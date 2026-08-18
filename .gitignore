@@ -1,0 +1,19 @@
+# 依赖与构建产物
+node_modules/
+*.log
+npm-debug.log*
+*.tgz
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 编辑器
+.idea/
+.vscode/
+
+# 密钥与凭据（切勿提交任何私钥 / 凭据文件）
+*.pem
+*.key
+id_rsa*
+*.pub

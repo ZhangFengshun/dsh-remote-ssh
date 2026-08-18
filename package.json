@@ -1,0 +1,73 @@
+{
+  "name": "dsh-remote-ssh",
+  "version": "1.2.0",
+  "description": "DSH web plugin: VSCode Remote-SSH-like remote development (SSH to supercomputers/servers, remote workspace, file explorer, integrated terminal), integrated with dsh-better-sidebar and DSH settings.",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "ssh",
+    "remote-development",
+    "remote-ssh",
+    "supercomputer",
+    "hpc"
+  ],
+  "author": {
+    "name": "ZhangFengshun",
+    "url": "https://github.com/ZhangFengshun"
+  },
+  "homepage": "https://github.com/ZhangFengshun/dsh-remote-ssh#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZhangFengshun/dsh-remote-ssh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZhangFengshun/dsh-remote-ssh/issues"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ],
+      "platform": "web"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "schemastery": "^3.18.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-settings": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "license": "MIT"
+}
