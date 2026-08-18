@@ -2,6 +2,13 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.0.0] — 内置文件页签直接 SSH 读写远程文件（不再需要同步）
+### 重大变更
+- **内置「文件」页签直接操作远程文件**：通过注册更长前缀 `/sidebar/api/fs.` 拦截 better-sidebar 的文件 API（`fs.tree`/`fs.read`/`fs.write`/`fs.search`），在远程工作区中直接通过 SSH 读写远程文件，不再需要 sync/push 同步。
+- **透明路径映射**：客户端看到的是本地镜像路径，host 拦截器自动转换为远程路径，通过 SSH 执行操作后返回结果。
+- **本地工作区照常**：非远程工作区的请求走本地 fs，行为与 better-sidebar 原始实现一致。
+- 不再依赖 tar 同步——打开文件 = 直接读远程，保存文件 = 直接写远程。
+
 ## [1.9.3] — 修复 syncDown 删除 .remote-ssh.json 导致终端不工作
 ### 修复
 - **`remoteSyncDown` 会清空镜像目录**：syncDown 先 `rm -rf` 镜像目录再 `tar xf` 展开，导致之前写入的 `.remote-ssh.json`（供 shell wrapper 读取连接信息）被删掉，终端 wrapper 检测不到远程工作区，降级到本地 shell。
