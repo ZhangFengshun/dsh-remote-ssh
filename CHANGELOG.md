@@ -2,6 +2,11 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.0.1] — 修复远程检测：从 payload.path 也查找 .remote-ssh.json
+### 修复
+- **sessionCwd 为空时无法检测远程工作区**：客户端请求有时只带 `payload.path` 不带 `cwd`，而 `ctx.sessions.get(sessionId)` 可能返回 undefined（session 未创建或 ID 不匹配）。现改为：先尝试 `sessionCwd`，再尝试 `payload.path`，两者都会检查 `.remote-ssh.json`。
+- 添加调试日志（`ctx.logger.info`）记录每次拦截的方法、sessionId、cwd 和远程检测结果。
+
 ## [2.0.0] — 内置文件页签直接 SSH 读写远程文件（不再需要同步）
 ### 重大变更
 - **内置「文件」页签直接操作远程文件**：通过注册更长前缀 `/sidebar/api/fs.` 拦截 better-sidebar 的文件 API（`fs.tree`/`fs.read`/`fs.write`/`fs.search`），在远程工作区中直接通过 SSH 读写远程文件，不再需要 sync/push 同步。
