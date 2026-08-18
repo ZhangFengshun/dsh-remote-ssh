@@ -2,6 +2,10 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [1.2.1] — 修复包名不一致
+### 修复
+- Host 半边导出的 `name` 与 Client 半边 `__ModuleLoader__.load({ id })` 统一改为作用域包名 `@zhangfengshun/dsh-remote-ssh`，与 `package.json` / `cordis.patch.yml` 一致，修复在新机器上安装时报「名字与发布名不一致」的错误。
+
 ## [1.2.0] — 中英文双语
 ### 新增
 - **界面国际化**：Client 半边接入 `ctx.locale`，注册 `dsh-remote-ssh` 命名空间的 `zh` / `en` 词典，所有界面文案（页签标题、设置小节、文件/终端页签、添加工作区弹窗）跟随 DSH 设置中的语言自动切换。
