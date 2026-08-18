@@ -2,6 +2,11 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [1.9.2] — 修复自动配置 patch 不生效（bundles 顺序）
+### 修复
+- **config 覆盖被跳过**：`cordis.patch.yml` 中的 `id: better-sidebar` config 覆盖需要在 `better-sidebar` 条目被 insert 之后才能生效。如果 `@zhangfengshun/dsh-remote-ssh` 在 bundles 列表中排在 `dsh-better-sidebar` 之前，patch 会因"entry not found"被跳过。
+- **修复方式**：在 README 中明确要求安装顺序（`@zhangfengshun/dsh-remote-ssh` 必须在 `dsh-better-sidebar` 之后），并提供手动调整 `profile/package.json` 中 `dsh.profile.bundles` 顺序的说明。
+
 ## [1.9.1] — 安装时自动配置 better-sidebar shell
 ### 改进
 - **安装即生效**：`cordis.patch.yml` 新增 `id: better-sidebar` 的 `config.shell` 覆盖，用 `!!js` 动态计算 wrapper 脚本路径（适配不同平台和用户主目录）。安装插件后无需手动编辑任何配置文件，重启 DSH 即可使用远程终端透明接入。

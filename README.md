@@ -29,10 +29,12 @@ dsh plugin --profile <name> add /absolute/path/to/dsh-remote-ssh
 ### 发布后安装
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.9.1
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.9.2
 ```
 
 > ⚠️ 安装后需**重启 DSH** 才生效；后续仅修改 Client 半边时刷新浏览器即可。
+>
+> ⚠️ **安装顺序**：本插件会自动覆盖 `dsh-better-sidebar` 的 `shell` 配置。为确保 patch 生效（config 覆盖在 insert 之后应用），`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。如果先安装了 `@zhangfengshun/dsh-remote-ssh`，再安装 `dsh-better-sidebar`，需手动调整 `profile/package.json` 中 `dsh.profile.bundles` 的顺序，把 `@zhangfengshun/dsh-remote-ssh` 移到最后。
 
 ## 快速开始
 
