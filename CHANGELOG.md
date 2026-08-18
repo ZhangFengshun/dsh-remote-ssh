@@ -2,6 +2,10 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [1.8.3] — 浏览按钮改回「打开」
+### 变更
+- 「浏览」按钮改回「打开」：按输入框路径加载该路径下的文件树，空路径时打开主目录。本地/远程行为一致，不再调用 `pickDirectory`（该原生对话框在仅有 `browse` capability 的环境下不可用）。回车导航保留。
+
 ## [1.8.2] — 修复浏览按钮：本地回退 + 远程打开主目录
 ### 修复
 - **本地浏览**：`pickDirectory()` 在仅有 `browse` capability（无 `native`）的 DSH 环境下会报错 `host.pickDirectory needs the native capability`。现改为：尝试原生选择框，失败时静默回退到加载用户主目录（`listDirectory` 默认列举 home）。用户取消也回到主目录。
