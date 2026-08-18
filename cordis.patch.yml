@@ -13,9 +13,10 @@
 - id: better-sidebar
   config:
     shell: !!js |
-      var os = require('os');
-      var path = require('path');
-      var dir = path.join(os.homedir(), '.dsh', 'remote-ssh');
-      var isWin = process.platform === 'win32';
-      var wrapper = isWin ? path.join(dir, 'dsh-remote-shell.cmd') : path.join(dir, 'dsh-remote-shell');
-      return wrapper;
+      (() => {
+        var homedir = process.env.USERPROFILE || process.env.HOME || process.env.HOMEDRIVE + process.env.HOMEPATH;
+        var isWin = process.platform === 'win32';
+        var sep = isWin ? '\\' : '/';
+        var dir = homedir + sep + '.dsh' + sep + 'remote-ssh';
+        return isWin ? dir + sep + 'dsh-remote-shell.cmd' : dir + sep + 'dsh-remote-shell';
+      })()

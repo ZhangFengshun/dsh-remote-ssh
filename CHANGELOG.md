@@ -2,6 +2,12 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [1.9.3] — 修复 syncDown 删除 .remote-ssh.json 导致终端不工作
+### 修复
+- **`remoteSyncDown` 会清空镜像目录**：syncDown 先 `rm -rf` 镜像目录再 `tar xf` 展开，导致之前写入的 `.remote-ssh.json`（供 shell wrapper 读取连接信息）被删掉，终端 wrapper 检测不到远程工作区，降级到本地 shell。
+- **修复**：在 `createRemoteWorkspace`、`syncDown` API、`remote_ssh_sync` 工具三处，都在 `remoteSyncDown` 完成后重新写入 `.remote-ssh.json`。
+- 已为现有工作区补写 `.remote-ssh.json`（无需重新创建工作区）。
+
 ## [1.9.2] — 修复自动配置 patch 不生效（bundles 顺序）
 ### 修复
 - **config 覆盖被跳过**：`cordis.patch.yml` 中的 `id: better-sidebar` config 覆盖需要在 `better-sidebar` 条目被 insert 之后才能生效。如果 `@zhangfengshun/dsh-remote-ssh` 在 bundles 列表中排在 `dsh-better-sidebar` 之前，patch 会因"entry not found"被跳过。
