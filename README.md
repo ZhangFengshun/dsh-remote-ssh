@@ -1,5 +1,7 @@
 # @zhangfengshun/dsh-remote-ssh
 
+[English](./README_EN.md) | 中文
+
 类 **VSCode Remote-SSH** 的 **DSH** 插件：通过 SSH 连接远程超算 / 服务器，在 DSH 内置「文件」「终端」页签中直接操作远程文件和终端。
 
 ## 功能
@@ -52,10 +54,6 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.1.0
 
 Shell wrapper（`~/.dsh/remote-ssh/dsh-remote-shell[.cmd]`）检测工作区 `.remote-ssh.json`，自动 `ssh -tt` 连接远程，使内置「终端」页签透明接入。
 
-## 许可证
-
-[MIT](./LICENSE)
-
 ## ❤️ 七夕快乐
 
 本项目是送给 **zhangyi** 的七夕礼物。
@@ -63,3 +61,7 @@ Shell wrapper（`~/.dsh/remote-ssh/dsh-remote-shell[.cmd]`）检测工作区 `.r
 愿它像连接起一台台远方的超算一样，也把我们紧紧连在一起。七夕快乐 ❤️
 
 —— 2026 年 8 月 18 日
+
+## 许可证
+
+[MIT](./LICENSE)
