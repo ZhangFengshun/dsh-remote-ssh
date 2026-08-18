@@ -11,12 +11,11 @@
 | 💻 远程终端 | 内置「终端」页签自动检测远程工作区，SSH 交互式终端 |
 | 🌐 远程工作区 | 选择远程目录创建原生工作区，一键进入远程环境 |
 | 🤖 模型工具 | 12 个 `remote_ssh_*` 工具，会话感知免填连接参数 |
-| 🌍 双语 | 中英文界面 + 工具描述，跟随 DSH 语言自动切换 |
 
 ## 安装
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.0.8
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.1.0
 ```
 
 > 安装后需**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
