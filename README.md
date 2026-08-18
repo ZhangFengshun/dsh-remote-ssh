@@ -29,18 +29,18 @@ dsh plugin --profile <name> add /absolute/path/to/dsh-remote-ssh
 ### 发布后安装
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.9.0
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.9.1
 ```
 
 > ⚠️ 安装后需**重启 DSH** 才生效；后续仅修改 Client 半边时刷新浏览器即可。
 
 ## 快速开始
 
-1. 安装插件并重启 DSH。
+1. 安装插件并重启 DSH（安装时自动配置 better-sidebar 的 shell 指向 wrapper 脚本）。
 2. 打开 **设置 → 🖥️ 远程连接**，添加一条连接（主机 / 端口 / 用户名 / 密钥或密码），点「测试连接」验证。
 3. 需要把远程目录当作工作区时：走 DSH 原生「添加工作区」流程，在弹窗中选择「**选择远程目录…**」→ 选择连接 → 浏览并选择远程目录。
 4. 创建后远程文件自动同步到本地镜像，内置「文件」页签直接可见。
-5. **（可选）远程终端**：在 DSH 设置中把 better-sidebar 的 `shell` 配置指向 wrapper 脚本（见下方「远程终端配置」），内置「终端」页签即可在远程工作区中自动打开 SSH 终端。
+5. 在远程工作区中打开内置「终端」页签 → 自动 SSH 到远程主机（仅密钥认证）。
 
 ## 使用指南
 
@@ -71,17 +71,18 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.9.0
 
 通过 shell wrapper 实现：终端启动时自动检测当前工作目录下的 `.remote-ssh.json`，若存在且含密钥路径 → 自动 `ssh -tt` 连接远程主机；否则启动本地 shell。
 
-**配置步骤**：
+**自动配置**：安装插件后，`cordis.patch.yml` 自动把 better-sidebar 的 `shell` 配置覆盖为 wrapper 脚本路径（用 `!!js` 动态计算，适配不同平台和用户主目录）。**无需手动编辑任何配置文件。**
 
+工作流程：
 1. 插件启动时自动在 `~/.dsh/remote-ssh/` 下生成 wrapper 脚本：
-   - Windows: `dsh-remote-shell.cmd`（调用 `dsh-remote-shell.js`）
-   - POSIX: `dsh-remote-shell`（调用 `dsh-remote-shell.js`）
-2. 在 DSH 设置中找到 better-sidebar 的 `shell` 配置项，填入 wrapper 脚本的完整路径：
-   - Windows: `C:\Users\<你>\.dsh\remote-ssh\dsh-remote-shell.cmd`
-   - POSIX: `/home/<你>/.dsh/remote-ssh/dsh-remote-shell`
+   - `dsh-remote-shell.js`（核心逻辑：检测 `.remote-ssh.json` → `ssh -tt`；否则本地 shell）
+   - Windows: `dsh-remote-shell.cmd`（薄壳调用 .js）
+   - POSIX: `dsh-remote-shell`（薄壳调用 .js）
+2. 安装时自动覆盖 better-sidebar 的 `shell` config 指向 wrapper 脚本。
 3. 重启 DSH 后，在远程工作区中打开终端 → 自动 SSH 到远程主机；在本地工作区中打开终端 → 照常启动本地 shell。
 
 > ⚠️ 终端透明接入仅支持**密钥认证**（密码无法安全传入 wrapper 脚本）。密码认证的连接仍可使用模型工具。
+> 若需覆盖自动配置，在 profile 的 `cordis.patch.yml` 中加一条 `id: better-sidebar` 的 `config.shell` 即可（profile patch 优先于 bundle patch）。
 
 ### 4. 远程工作区（🌐）
 
@@ -158,11 +159,10 @@ dsh-remote-ssh/
 ## 已知限制
 
 1. **终端透明接入仅限密钥认证**：shell wrapper 通过 `.remote-ssh.json` 读取密钥路径，密码认证无法安全传入。密码认证的连接仍可使用模型工具和远程文件操作。
-2. **终端需手动配置 shell**：需在 DSH 设置中把 better-sidebar 的 `shell` 指向 wrapper 脚本路径，终端透明接入才生效。
-3. **文件操作依赖 GNU 工具**（`find -printf`、`base64 -w0`）：目标为 Linux 超算时通用。
-4. **密码认证需本机 `sshpass`**（Windows 默认没有）；密钥认证无此依赖。
-5. **同步为全量 tar**：`remote_ssh_sync` / `remote_ssh_push` 用 `tar` 流式全量同步，单次同步大目录耗时与传输量较高，后续可换 `rsync -e ssh` 增量。
-6. **内置编辑器编辑的是本地镜像副本**，不会自动回传 —— 须在设置页点「推送」或调用 `remote_ssh_push` 同步回远端。
+2. **文件操作依赖 GNU 工具**（`find -printf`、`base64 -w0`）：目标为 Linux 超算时通用。
+3. **密码认证需本机 `sshpass`**（Windows 默认没有）；密钥认证无此依赖。
+4. **同步为全量 tar**：`remote_ssh_sync` / `remote_ssh_push` 用 `tar` 流式全量同步，单次同步大目录耗时与传输量较高，后续可换 `rsync -e ssh` 增量。
+5. **内置编辑器编辑的是本地镜像副本**，不会自动回传 —— 须在设置页点「推送」或调用 `remote_ssh_push` 同步回远端。
 
 ## 路线图
 

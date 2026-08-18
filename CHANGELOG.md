@@ -2,6 +2,10 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [1.9.1] — 安装时自动配置 better-sidebar shell
+### 改进
+- **安装即生效**：`cordis.patch.yml` 新增 `id: better-sidebar` 的 `config.shell` 覆盖，用 `!!js` 动态计算 wrapper 脚本路径（适配不同平台和用户主目录）。安装插件后无需手动编辑任何配置文件，重启 DSH 即可使用远程终端透明接入。
+
 ## [1.9.0] — 远程文件/终端合并到内置页签
 ### 重大变更
 - **移除 `remssh:files` 和 `remssh:term` 页签**：远程文件和远程终端不再使用独立侧边栏页签。

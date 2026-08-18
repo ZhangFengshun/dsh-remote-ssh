@@ -5,3 +5,17 @@
 - insert:
     - id: remote-ssh
       name: '@zhangfengshun/dsh-remote-ssh'
+# 自动覆盖 better-sidebar 的 shell 配置，指向本插件生成的 shell wrapper。
+# wrapper 脚本在插件 apply() 时写入 ~/.dsh/remote-ssh/dsh-remote-shell[.cmd]：
+#   - 远程工作区（cwd 含 .remote-ssh.json 且 keyPath 非空）→ ssh -tt 连远程
+#   - 本地工作区 → 照常启动本地 shell
+# 路径用 !!js 动态计算，适配不同平台和用户主目录。
+- id: better-sidebar
+  config:
+    shell: !!js |
+      var os = require('os');
+      var path = require('path');
+      var dir = path.join(os.homedir(), '.dsh', 'remote-ssh');
+      var isWin = process.platform === 'win32';
+      var wrapper = isWin ? path.join(dir, 'dsh-remote-shell.cmd') : path.join(dir, 'dsh-remote-shell');
+      return wrapper;
