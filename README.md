@@ -11,13 +11,12 @@
 | 🔌 远程连接 | SSH 连接超算 / 服务器，密钥认证（推荐）或密码认证（需本机 `sshpass`），内置「测试连接」；支持 `ProxyJump` 跳板机 |
 | ⚡ 连接复用 | 持久 SSH 会话池，文件操作复用同一条已认证连接，不再每次握手（首次后近乎瞬时） |
 | 📥 配置导入 | 一键从 `~/.ssh/config`（递归 `Include`）发现主机并批量导入连接配置 |
-| 🗂️ 远程文件 | 在 better-sidebar「远程文件」页签浏览 / 打开 / 编辑 / 保存远程文件；选中工作区后可双向同步 |
-| 💻 远程终端 | 在 better-sidebar「远程终端」页签打开 `ssh -tt` 集成终端，支持多终端并发 |
-| 🔄 双向同步 | `remote_ssh_sync`（远端 → 本地镜像）/ `remote_ssh_push`（本地镜像 → 远端），tar 流式管道，同步后内置文件工具可见 |
-| 🌐 远程工作区 | 选择远程目录创建**原生工作区**（本地镜像目录 + 原生注册），一键打开进入远程环境 |
+| 🗂️ 远程文件 | 创建远程工作区时自动同步到本地镜像，内置「文件」页签直接显示远程文件；编辑后通过设置页同步/推送回传 |
+| 💻 远程终端 | 内置「终端」页签自动通过 shell wrapper 检测远程工作区，打开 SSH 交互式终端（仅密钥认证） |
+| 🔄 双向同步 | 设置页一键同步（远端 → 本地镜像）/ 推送（本地镜像 → 远端），或通过 `remote_ssh_sync` / `remote_ssh_push` 工具 |
+| 🌐 远程工作区 | 选择远程目录创建**原生工作区**（本地镜像目录 + 原生注册 + 自动同步），一键打开进入远程环境 |
 | 🤖 模型工具 | 12 个 `remote_ssh_*` 工具，模型可读写远程文件、执行远程命令、内容搜索、文件名查找、目录/删除/移动、双向同步；在远程工作区会话中免填连接参数 |
 | 🌍 国际化 | 界面文案 + 工具描述中英双语，通过 `ctx.locale` 跟随 DSH 语言设置自动切换 |
-| 🧠 会话记忆 | 切换会话后，「远程文件」「远程终端」页签记住已选连接、浏览目录、打开的文件与终端 |
 
 ## 安装
 
@@ -30,7 +29,7 @@ dsh plugin --profile <name> add /absolute/path/to/dsh-remote-ssh
 ### 发布后安装
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.8.3
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.9.0
 ```
 
 > ⚠️ 安装后需**重启 DSH** 才生效；后续仅修改 Client 半边时刷新浏览器即可。
@@ -39,8 +38,9 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.8.3
 
 1. 安装插件并重启 DSH。
 2. 打开 **设置 → 🖥️ 远程连接**，添加一条连接（主机 / 端口 / 用户名 / 密钥或密码），点「测试连接」验证。
-3. 在侧边栏打开 **🗂️ 远程文件** 或 **💻 远程终端** 页签使用。
-4. 需要把远程目录当作工作区时：走 DSH 原生「添加工作区」流程，在弹窗中选择「**选择远程目录…**」。
+3. 需要把远程目录当作工作区时：走 DSH 原生「添加工作区」流程，在弹窗中选择「**选择远程目录…**」→ 选择连接 → 浏览并选择远程目录。
+4. 创建后远程文件自动同步到本地镜像，内置「文件」页签直接可见。
+5. **（可选）远程终端**：在 DSH 设置中把 better-sidebar 的 `shell` 配置指向 wrapper 脚本（见下方「远程终端配置」），内置「终端」页签即可在远程工作区中自动打开 SSH 终端。
 
 ## 使用指南
 
@@ -60,22 +60,34 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.8.3
 
 连接配置持久化在 DSH 设置命名空间 `dsh-remote-ssh` 中（密码字段 `role('secret')` 脱敏）。
 
-### 2. 远程文件（🗂️）
+### 2. 远程文件（内置「文件」页签）
 
-- 选择**远程工作区**或**连接配置**，浏览远程目录；
-- 点击文件即可打开并编辑，保存后写回远程；
-- 已选连接 / 目录 / 打开的文件在**切换会话后自动恢复**。
+- 创建远程工作区时，远程文件自动同步到本地镜像目录，内置「文件」页签直接显示；
+- 内置编辑器编辑的是本地镜像副本，编辑后需**推送回远端**；
+- 推送方式：设置 → 远程连接 → 远程工作区 → 点「⬆ 推送」按钮，或模型调用 `remote_ssh_push` 工具；
+- 远程有更新时点「⬇ 同步」重新拉取。
 
-### 3. 远程终端（💻）
+### 3. 远程终端（内置「终端」页签）
 
-- 选择连接配置，点「新建终端」打开 `ssh -tt` 交互式终端；
-- 支持同时打开多个终端，会话切换后终端列表自动恢复（终端本体在宿主进程存活，恢复后继续回显）。
+通过 shell wrapper 实现：终端启动时自动检测当前工作目录下的 `.remote-ssh.json`，若存在且含密钥路径 → 自动 `ssh -tt` 连接远程主机；否则启动本地 shell。
+
+**配置步骤**：
+
+1. 插件启动时自动在 `~/.dsh/remote-ssh/` 下生成 wrapper 脚本：
+   - Windows: `dsh-remote-shell.cmd`（调用 `dsh-remote-shell.js`）
+   - POSIX: `dsh-remote-shell`（调用 `dsh-remote-shell.js`）
+2. 在 DSH 设置中找到 better-sidebar 的 `shell` 配置项，填入 wrapper 脚本的完整路径：
+   - Windows: `C:\Users\<你>\.dsh\remote-ssh\dsh-remote-shell.cmd`
+   - POSIX: `/home/<你>/.dsh/remote-ssh/dsh-remote-shell`
+3. 重启 DSH 后，在远程工作区中打开终端 → 自动 SSH 到远程主机；在本地工作区中打开终端 → 照常启动本地 shell。
+
+> ⚠️ 终端透明接入仅支持**密钥认证**（密码无法安全传入 wrapper 脚本）。密码认证的连接仍可使用模型工具。
 
 ### 4. 远程工作区（🌐）
 
 1. 打开 DSH 原生「添加工作区」流程；
 2. 选择「**选择远程目录…**」→ 选择连接 → 浏览并选择远程目录；
-3. 插件在本地生成镜像目录 `~/.dsh/remote-workspaces/<id>` 并注册进原生工作区列表（标题 `🌐 <名称>`）；
+3. 插件在本地生成镜像目录 `~/.dsh/remote-workspaces/<id>`，写入 `.remote-ssh.json`（连接信息，供 shell wrapper 读取），自动同步远程文件，并注册进原生工作区列表（标题 `🌐 <名称>`）；
 4. 从工作区创建会话后，会话工作目录即该镜像目录，模型工具自动感知对应的远程连接与目录。
 
 ### 5. 模型工具（🤖）
@@ -118,13 +130,18 @@ dsh-remote-ssh/
 ```
 浏览器 (Client 半边)                     Node 进程 (Host 半边)
 ┌───────────────────────────────┐  fetch  ┌──────────────────────────────────┐
-│ ctx.betterSidebar.registerTab │ ──────▶ │ ctx.webServer /remote-ssh/api/*  │
-│  · 远程文件 / 远程终端        │ ◀────── │  · SSH：listDir/readFile/…       │
-│ ctx.slots: settings.section   │  JSON   │  · settings：profiles/workspaces  │
-│  · DSH 设置页「远程连接」      │         │  · terminals：ssh -tt 管道        │
-└───────────────────────────────┘         │ ctx.tools：12 个 remote_ssh_*    │
-                                          └───────────────┬──────────────────┘
-                                                          │ SSH
+│ ctx.betterSidebar.registerTab  │ ──────▶ │ ctx.webServer /remote-ssh/api/*  │
+│  · remssh:editor (隐藏)        │ ◀────── │  · SSH：listDir/readFile/…       │
+│ ctx.slots: settings.section    │  JSON   │  · settings：profiles/workspaces  │
+│  · 连接配置 + 工作区管理       │         │  · 自动同步 + shell wrapper 生成  │
+│ ctx.slots: directoryFlow       │         │ ctx.tools：12 个 remote_ssh_*    │
+│  · 本地 / 远程目录两选弹窗     │         └───────────────┬──────────────────┘
+└───────────────────────────────┘                          │ SSH
+                                              ┌─────────────┴──────────┐
+                                              │ ~/.dsh/remote-ssh/    │
+                                              │  dsh-remote-shell.js   │
+                                              │  dsh-remote-shell[.cmd]│ ← better-sidebar shell 指向此文件
+                                              └────────────────────────┘
                                                      远程超算 / 服务器
 ```
 
@@ -134,24 +151,27 @@ dsh-remote-ssh/
 - **二进制安全读文件**：远程 `base64 -w0` 输出，Host 用 `Buffer` 解码为 UTF-8。
 - **写文件走 stdin**：远程 `cat > <file>`，内容经子进程 stdin 传入。
 - **文件列举**：`find -printf '%Y\t%f\t%s\n'`（`%Y` 跟随软链接取目标类型，适配超算家目录软链接）。
-- **终端**：`ssh -tt` 分配远程 PTY，本地管道转发，客户端 HTTP 轮询回显（无 `node-pty` 依赖，Windows 可用）。
+- **自动同步**：创建远程工作区时立即 `tar | ssh` 拉取远程文件到本地镜像，使内置「文件」页签可见真实远程文件。
+- **Shell wrapper**：插件启动时生成跨平台 wrapper 脚本（Node.js + 薄壳），检测工作区 `.remote-ssh.json` 自动 SSH，使内置「终端」页签透明接入远程。
 - **国际化**：Client 接入 `ctx.locale`，注册 `zh` / `en` 词典，界面与工具描述跟随 DSH 语言自动切换。
 
 ## 已知限制
 
-1. **终端非本地 PTY**：走 `ssh -tt` 管道通道（跨平台可用）；`vim` / `htop` 等全屏程序体验受限，后续可接入 `terminals.registerBackend` + `node-pty` 真 PTY。
-2. **文件操作依赖 GNU 工具**（`find -printf`、`base64 -w0`）：目标为 Linux 超算时通用。
-3. **密码认证需本机 `sshpass`**（Windows 默认没有）；密钥认证无此依赖。
-4. **同步为全量 tar**：`remote_ssh_sync` / `remote_ssh_push` 用 `tar` 流式全量同步，单次同步大目录耗时与传输量较高，后续可换 `rsync -e ssh` 增量。
-5. **原生工具编辑的是本地镜像副本**，不会自动回传 —— 须点「推送」或调用 `remote_ssh_push` 同步回远端（与 `dsh-remote` 的 `rw_sync` / `rw_push` 模型一致）。
+1. **终端透明接入仅限密钥认证**：shell wrapper 通过 `.remote-ssh.json` 读取密钥路径，密码认证无法安全传入。密码认证的连接仍可使用模型工具和远程文件操作。
+2. **终端需手动配置 shell**：需在 DSH 设置中把 better-sidebar 的 `shell` 指向 wrapper 脚本路径，终端透明接入才生效。
+3. **文件操作依赖 GNU 工具**（`find -printf`、`base64 -w0`）：目标为 Linux 超算时通用。
+4. **密码认证需本机 `sshpass`**（Windows 默认没有）；密钥认证无此依赖。
+5. **同步为全量 tar**：`remote_ssh_sync` / `remote_ssh_push` 用 `tar` 流式全量同步，单次同步大目录耗时与传输量较高，后续可换 `rsync -e ssh` 增量。
+6. **内置编辑器编辑的是本地镜像副本**，不会自动回传 —— 须在设置页点「推送」或调用 `remote_ssh_push` 同步回远端。
 
 ## 路线图
 
 - [x] 从 `~/.ssh/config` 自动导入连接
 - [x] ProxyJump / 跳板机、SSH config 复用
 - [x] `tar`-over-ssh 双向同步（`scp` / `sftp` 增量同步为后续优化）
+- [x] 远程文件合并到内置「文件」页签（自动同步 + 镜像）
+- [x] 远程终端合并到内置「终端」页签（shell wrapper 透明 SSH）
 - [ ] `rsync -e ssh` 增量同步
-- [ ] 真 PTY 终端（`terminals.registerBackend` + `node-pty`）
 - [ ] 密码凭据走 `credentials` 服务（避免明文进 argv）
 
 ## 许可证

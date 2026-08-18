@@ -2,6 +2,16 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [1.9.0] — 远程文件/终端合并到内置页签
+### 重大变更
+- **移除 `remssh:files` 和 `remssh:term` 页签**：远程文件和远程终端不再使用独立侧边栏页签。
+- **远程文件 → 内置「文件」页签**：创建远程工作区时自动 `tar | ssh` 同步远程文件到本地镜像目录，内置「文件」页签直接显示真实远程文件。编辑后通过设置页「同步/推送」按钮或 `remote_ssh_push` 工具回传。
+- **远程终端 → 内置「终端」页签**：插件启动时自动生成跨平台 shell wrapper 脚本（`~/.dsh/remote-ssh/dsh-remote-shell[.cmd]`）。在 DSH 设置中将 better-sidebar 的 `shell` 指向该脚本后，内置「终端」页签在远程工作区中自动 SSH 到远程主机，在本地工作区中照常启动本地 shell。
+- **设置页新增「远程工作区」管理区**：列出所有远程工作区，支持同步/推送/删除操作。
+- **创建工作区时写入 `.remote-ssh.json`**：镜像目录中写入连接信息（host/port/user/keyPath/proxyJump/remotePath），供 shell wrapper 读取。
+- 保留隐藏的 `remssh:editor` 页签用于远程文件编辑器。
+- ⚠️ 终端透明接入仅支持**密钥认证**（密码无法安全传入 wrapper 脚本）。
+
 ## [1.8.3] — 浏览按钮改回「打开」
 ### 变更
 - 「浏览」按钮改回「打开」：按输入框路径加载该路径下的文件树，空路径时打开主目录。本地/远程行为一致，不再调用 `pickDirectory`（该原生对话框在仅有 `browse` capability 的环境下不可用）。回车导航保留。
