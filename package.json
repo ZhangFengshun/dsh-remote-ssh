@@ -1,5 +1,5 @@
 {
-  "name": "dsh-remote-ssh",
+  "name": "@zhangfengshun/dsh-remote-ssh",
   "version": "1.2.0",
   "description": "DSH web plugin: VSCode Remote-SSH-like remote development (SSH to supercomputers/servers, remote workspace, file explorer, integrated terminal), integrated with dsh-better-sidebar and DSH settings.",
   "keywords": [
@@ -69,5 +69,8 @@
     "LICENSE",
     "CHANGELOG.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT"
 }

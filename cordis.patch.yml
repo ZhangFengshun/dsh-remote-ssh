@@ -1,7 +1,7 @@
-# dsh-remote-ssh bundle patch
+# @zhangfengshun/dsh-remote-ssh bundle patch
 #
-# 通过官方 CLI 安装时会依据此声明把 `dsh-remote-ssh` 追加到 profile 的 bundle 栈：
-#   dsh plugin --profile <name> add dsh-remote-ssh@<version>
+# 通过官方 CLI 安装时会依据此声明把 `@zhangfengshun/dsh-remote-ssh` 追加到 profile 的 bundle 栈：
+#   dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@<version>
 - insert:
     - id: remote-ssh
-      name: 'dsh-remote-ssh'
+      name: '@zhangfengshun/dsh-remote-ssh'

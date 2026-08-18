@@ -1,4 +1,4 @@
-# dsh-remote-ssh
+# @zhangfengshun/dsh-remote-ssh
 
 类 **VSCode Remote-SSH** 的 **DeepSeek Harness（DSH）** Web 插件：通过 SSH 连接远程超算 / 服务器，在 DSH 中完成远程工作区、远程文件浏览 / 编辑、集成远程终端，并让模型可以直接读写远程文件、执行远程命令。
 
@@ -27,7 +27,7 @@ dsh plugin --profile <name> add /absolute/path/to/dsh-remote-ssh
 ### 发布后安装
 
 ```bash
-dsh plugin --profile <name> add dsh-remote-ssh@1.2.0
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.2.0
 ```
 
 > ⚠️ 安装后需**重启 DSH** 才生效；后续仅修改 Client 半边时刷新浏览器即可。
