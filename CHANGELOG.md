@@ -2,6 +2,10 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [1.3.1] — 修复远程文件树滚动
+### 修复
+- 「远程文件」页签改为 flex 布局：文件树在文件很多时占据剩余高度并内部滚动（`flex:1; overflow-y:auto`），不再因父容器 `overflow:hidden` 而无法往下拉。
+
 ## [1.3.0] — 外观跟随主题
 ### 新增
 - 远程连接相关界面（设置小节、远程文件 / 终端页签、添加工作区弹窗）的颜色全部改用 DSH 主题 token（`--dsw-alias-*`），自动跟随 DSH 明暗主题（`body[data-ds-dark-theme]`）切换，不再硬编码深色配色。
