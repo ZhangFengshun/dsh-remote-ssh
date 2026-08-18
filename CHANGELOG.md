@@ -2,6 +2,14 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [1.5.0] — 导入 OpenSSH 配置 + 双向同步
+### 新增
+- **从 `~/.ssh/config` 导入连接**：设置小节「从 ~/.ssh/config 导入…」按钮读取本机 OpenSSH 用户配置（递归解析 `Include`），多选主机后批量导入为连接配置（`HostName` / `User` / `Port` / `IdentityFile` / `ProxyJump` 一并带入）。借鉴 Yan-Zero `dsh-remote-ssh`，免去逐条手动录入。
+- **跳板机（ProxyJump）**：连接配置新增可选 `ProxyJump` 字段，`sshArgv` 追加 `-o ProxyJump=...`，OpenSSH 原生支持；导入的带跳板机主机开箱即用。
+- **tar-over-ssh 双向同步**：新增 `syncDown`（远端 → 本地镜像）/ `syncUp`（本地镜像 → 远端）HTTP API 与 `remote_ssh_sync` / `remote_ssh_push` 模型工具，用流式管道把一条 ssh 的 stdout 喂给本地 `tar` 的 stdin（反之亦然），不经过 4MB 缓冲上限。借鉴 flymysql `dsh-remote` 的 `rw_sync` / `rw_push`，但复用现有 `ssh.exe` + `tar`，不引入 `ssh2` 依赖。
+- 「远程文件」页签在选中工作区时显示「⬇ 同步 / ⬆ 推送」按钮，同步后镜像目录装下真实远程文件，内置 `read`/`grep`/`glob` 工具可直接读取镜像。
+- `remote_ssh_sync` / `remote_ssh_push` 工具会话感知：在远程工作区会话中无需 `workspaceId`，自动识别当前工作区。
+
 ## [1.4.0] — 远程文件单开一栏预览
 ### 新增
 - 点击「远程文件」文件树中的文件，改为在 better-sidebar 中**单开一栏（独立页签）预览/编辑**，与内置「文件」页签一致，不再在文件树下方内嵌预览。新增隐藏页签类型 `remssh:editor`，同一远程文件按 (profileId, path) 去重复用。

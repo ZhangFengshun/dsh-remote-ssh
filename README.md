@@ -8,11 +8,13 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| 🔌 远程连接 | SSH 连接超算 / 服务器，密钥认证（推荐）或密码认证（需本机 `sshpass`），内置「测试连接」 |
-| 🗂️ 远程文件 | 在 better-sidebar「远程文件」页签浏览 / 打开 / 编辑 / 保存远程文件 |
+| 🔌 远程连接 | SSH 连接超算 / 服务器，密钥认证（推荐）或密码认证（需本机 `sshpass`），内置「测试连接」；支持 `ProxyJump` 跳板机 |
+| 📥 配置导入 | 一键从 `~/.ssh/config`（递归 `Include`）发现主机并批量导入连接配置 |
+| 🗂️ 远程文件 | 在 better-sidebar「远程文件」页签浏览 / 打开 / 编辑 / 保存远程文件；选中工作区后可双向同步 |
 | 💻 远程终端 | 在 better-sidebar「远程终端」页签打开 `ssh -tt` 集成终端，支持多终端并发 |
+| 🔄 双向同步 | `remote_ssh_sync`（远端 → 本地镜像）/ `remote_ssh_push`（本地镜像 → 远端），tar 流式管道，同步后内置文件工具可见 |
 | 🌐 远程工作区 | 选择远程目录创建**原生工作区**（本地镜像目录 + 原生注册），一键打开进入远程环境 |
-| 🤖 模型工具 | 5 个 `remote_ssh_*` 工具，模型可读写远程文件、执行远程命令；在远程工作区会话中免填连接参数 |
+| 🤖 模型工具 | 7 个 `remote_ssh_*` 工具，模型可读写远程文件、执行远程命令、双向同步；在远程工作区会话中免填连接参数 |
 | 🌍 国际化 | 界面文案 + 工具描述中英双语，通过 `ctx.locale` 跟随 DSH 语言设置自动切换 |
 | 🧠 会话记忆 | 切换会话后，「远程文件」「远程终端」页签记住已选连接、浏览目录、打开的文件与终端 |
 
@@ -27,7 +29,7 @@ dsh plugin --profile <name> add /absolute/path/to/dsh-remote-ssh
 ### 发布后安装
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.2.0
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.5.0
 ```
 
 > ⚠️ 安装后需**重启 DSH** 才生效；后续仅修改 Client 半边时刷新浏览器即可。
@@ -86,6 +88,8 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.2.0
 | `remote_ssh_ls` | 列举远程目录 |
 | `remote_ssh_cat` | 读取远程文本文件（base64 传输，二进制安全） |
 | `remote_ssh_write` | 写入远程文件（覆盖写入） |
+| `remote_ssh_sync` | 远端文件同步到本地镜像目录（tar 流式管道） |
+| `remote_ssh_push` | 本地镜像目录推送回远端（tar 流式管道） |
 
 **会话感知**：当会话是从远程工作区创建时，模型调用这些工具可**不填** `profileId` / `host` / `user` 等连接参数，自动复用该工作区的连接，相对路径基于该工作区远程目录解析。
 
@@ -112,7 +116,7 @@ dsh-remote-ssh/
 │  · 远程文件 / 远程终端        │ ◀────── │  · SSH：listDir/readFile/…       │
 │ ctx.slots: settings.section   │  JSON   │  · settings：profiles/workspaces  │
 │  · DSH 设置页「远程连接」      │         │  · terminals：ssh -tt 管道        │
-└───────────────────────────────┘         │ ctx.tools：5 个 remote_ssh_*     │
+└───────────────────────────────┘         │ ctx.tools：7 个 remote_ssh_*     │
                                           └───────────────┬──────────────────┘
                                                           │ SSH
                                                      远程超算 / 服务器
@@ -132,15 +136,16 @@ dsh-remote-ssh/
 1. **终端非本地 PTY**：走 `ssh -tt` 管道通道（跨平台可用）；`vim` / `htop` 等全屏程序体验受限，后续可接入 `terminals.registerBackend` + `node-pty` 真 PTY。
 2. **文件操作依赖 GNU 工具**（`find -printf`、`base64 -w0`）：目标为 Linux 超算时通用。
 3. **密码认证需本机 `sshpass`**（Windows 默认没有）；密钥认证无此依赖。
-4. **无大文件上传 / 下载**：当前读 / 写为文本流，可后续加 `scp` / `sftp`。
-5. **镜像目录对内置文件工具不可见**：远程工作区的本地镜像目录是注册占位，模型对远程文件应使用 `remote_ssh_*` 工具（镜像目录内已放置说明文件）。
+4. **同步为全量 tar**：`remote_ssh_sync` / `remote_ssh_push` 用 `tar` 流式全量同步，单次同步大目录耗时与传输量较高，后续可换 `rsync -e ssh` 增量。
+5. **原生工具编辑的是本地镜像副本**，不会自动回传 —— 须点「推送」或调用 `remote_ssh_push` 同步回远端（与 `dsh-remote` 的 `rw_sync` / `rw_push` 模型一致）。
 
 ## 路线图
 
+- [x] 从 `~/.ssh/config` 自动导入连接
+- [x] ProxyJump / 跳板机、SSH config 复用
+- [x] `tar`-over-ssh 双向同步（`scp` / `sftp` 增量同步为后续优化）
+- [ ] `rsync -e ssh` 增量同步
 - [ ] 真 PTY 终端（`terminals.registerBackend` + `node-pty`）
-- [ ] `scp` / `sftp` 上传下载
-- [ ] 从 `~/.ssh/config` 自动导入连接
-- [ ] ProxyJump / 跳板机、SSH config 复用
 - [ ] 密码凭据走 `credentials` 服务（避免明文进 argv）
 
 ## 许可证
