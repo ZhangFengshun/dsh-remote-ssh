@@ -2,6 +2,14 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [1.7.0] — SSH 连接复用（大幅加速）
+### 重大优化
+- **持久 SSH 会话池**：`ls`/`cat`/`write`/`grep`/`glob`/`mkdir`/`delete`/`move` 等文件操作不再每次新建 ssh 子进程（每次都要完整 TCP 握手 + 密钥交换 + 认证，超算/跳板机单次 2-10 秒）。改为维护一条常驻 `ssh <host> bash` 进程，所有命令复用它，用哨兵标记（sentinel）分隔输出、解析退出码。首次连接后，后续操作近乎瞬时。
+- **自动回退**：持久会话断开（网络中断、远端重启等）时自动清理并回退到一次性 `runRemote`，保证可靠性。
+- **空闲清理**：会话空闲超过 10 分钟自动断开，避免占着连接。插件卸载时全部清理。
+- `remote_ssh_exec` 与测试连接仍用一次性连接（保留 stdout/stderr 分离）。
+- Windows OpenSSH 不支持 ControlMaster（已验证），故采用此进程内会话池方案，不依赖 ControlMaster。
+
 ## [1.6.0] — 远程搜索与文件操作工具
 ### 新增
 - **内容搜索 `remote_ssh_grep`**：在远端递归搜索文件内容（`grep -rnIE`，扩展正则），支持 `include` 文件名过滤（如 `*.py`）、`ignoreCase` 忽略大小写、`maxResults` 限流（默认 200）。借鉴 dsh-remote / dsh-remote-ssh 的远程搜索，但用通用 GNU grep（超算/Linux 通用，不依赖 ripgrep）。

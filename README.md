@@ -9,6 +9,7 @@
 | 能力 | 说明 |
 | --- | --- |
 | 🔌 远程连接 | SSH 连接超算 / 服务器，密钥认证（推荐）或密码认证（需本机 `sshpass`），内置「测试连接」；支持 `ProxyJump` 跳板机 |
+| ⚡ 连接复用 | 持久 SSH 会话池，文件操作复用同一条已认证连接，不再每次握手（首次后近乎瞬时） |
 | 📥 配置导入 | 一键从 `~/.ssh/config`（递归 `Include`）发现主机并批量导入连接配置 |
 | 🗂️ 远程文件 | 在 better-sidebar「远程文件」页签浏览 / 打开 / 编辑 / 保存远程文件；选中工作区后可双向同步 |
 | 💻 远程终端 | 在 better-sidebar「远程终端」页签打开 `ssh -tt` 集成终端，支持多终端并发 |
@@ -29,7 +30,7 @@ dsh plugin --profile <name> add /absolute/path/to/dsh-remote-ssh
 ### 发布后安装
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.6.0
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.7.0
 ```
 
 > ⚠️ 安装后需**重启 DSH** 才生效；后续仅修改 Client 半边时刷新浏览器即可。
