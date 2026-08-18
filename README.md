@@ -11,11 +11,10 @@
 | 🔌 远程连接 | SSH 连接超算 / 服务器，密钥认证（推荐）或密码认证（需本机 `sshpass`），内置「测试连接」；支持 `ProxyJump` 跳板机 |
 | ⚡ 连接复用 | 持久 SSH 会话池，文件操作复用同一条已认证连接，不再每次握手（首次后近乎瞬时） |
 | 📥 配置导入 | 一键从 `~/.ssh/config`（递归 `Include`）发现主机并批量导入连接配置 |
-| 🗂️ 远程文件 | 创建远程工作区时自动同步到本地镜像，内置「文件」页签直接显示远程文件；编辑后通过设置页同步/推送回传 |
+| 📂 远程文件 | 内置「文件」页签通过 fs.* 拦截**直接 SSH 读写远程文件**，无需同步——打开即读远程，保存即写远程 |
 | 💻 远程终端 | 内置「终端」页签自动通过 shell wrapper 检测远程工作区，打开 SSH 交互式终端（仅密钥认证） |
-| 🔄 双向同步 | 设置页一键同步（远端 → 本地镜像）/ 推送（本地镜像 → 远端），或通过 `remote_ssh_sync` / `remote_ssh_push` 工具 |
-| 🌐 远程工作区 | 选择远程目录创建**原生工作区**（本地镜像目录 + 原生注册 + 自动同步），一键打开进入远程环境 |
-| 🤖 模型工具 | 12 个 `remote_ssh_*` 工具，模型可读写远程文件、执行远程命令、内容搜索、文件名查找、目录/删除/移动、双向同步；在远程工作区会话中免填连接参数 |
+| 🌐 远程工作区 | 选择远程目录创建**原生工作区**（本地镜像目录 + 原生注册），一键打开进入远程环境 |
+| 🤖 模型工具 | 12 个 `remote_ssh_*` 工具，模型可读写远程文件、执行远程命令、内容搜索、文件名查找、目录/删除/移动；在远程工作区会话中免填连接参数 |
 | 🌍 国际化 | 界面文案 + 工具描述中英双语，通过 `ctx.locale` 跟随 DSH 语言设置自动切换 |
 
 ## 安装
@@ -29,7 +28,7 @@ dsh plugin --profile <name> add /absolute/path/to/dsh-remote-ssh
 ### 发布后安装
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.0.0
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.0.7
 ```
 
 > ⚠️ 安装后需**重启 DSH** 才生效；后续仅修改 Client 半边时刷新浏览器即可。
@@ -41,7 +40,7 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.0.0
 1. 安装插件并重启 DSH（安装时自动配置 better-sidebar 的 shell 指向 wrapper 脚本）。
 2. 打开 **设置 → 🖥️ 远程连接**，添加一条连接（主机 / 端口 / 用户名 / 密钥或密码），点「测试连接」验证。
 3. 需要把远程目录当作工作区时：走 DSH 原生「添加工作区」流程，在弹窗中选择「**选择远程目录…**」→ 选择连接 → 浏览并选择远程目录。
-4. 创建后远程文件自动同步到本地镜像，内置「文件」页签直接可见。
+4. 创建后内置「文件」页签**直接显示远程文件**——打开文件即读远程，保存即写远程，无需同步。
 5. 在远程工作区中打开内置「终端」页签 → 自动 SSH 到远程主机（仅密钥认证）。
 
 ## 使用指南
@@ -64,10 +63,14 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.0.0
 
 ### 2. 远程文件（内置「文件」页签）
 
-- 创建远程工作区时，远程文件自动同步到本地镜像目录，内置「文件」页签直接显示；
-- 内置编辑器编辑的是本地镜像副本，编辑后需**推送回远端**；
-- 推送方式：设置 → 远程连接 → 远程工作区 → 点「⬆ 推送」按钮，或模型调用 `remote_ssh_push` 工具；
-- 远程有更新时点「⬇ 同步」重新拉取。
+**直接 SSH 读写，无需同步**：
+
+- 在远程工作区中打开内置「文件」页签 → 直接显示远程文件树；
+- 点击文件 → 直接通过 SSH 读取远程文件内容；
+- 编辑保存 → 直接通过 SSH 写回远程文件；
+- 全程透明：客户端看到的是本地镜像路径，Host 拦截器自动转换为远程路径并通过 SSH 执行。
+
+**技术原理**：插件注册了 4 个 exact 路由（`/sidebar/api/fs.tree`、`fs.read`、`fs.write`、`fs.search`），在 better-sidebar 的 prefix 路由之前拦截。当请求路径对应的会话 cwd 含 `.remote-ssh.json` 时走 SSH，否则走本地 fs（行为与 better-sidebar 原始实现一致）。
 
 ### 3. 远程终端（内置「终端」页签）
 
@@ -83,19 +86,19 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.0.0
 2. 安装时自动覆盖 better-sidebar 的 `shell` config 指向 wrapper 脚本。
 3. 重启 DSH 后，在远程工作区中打开终端 → 自动 SSH 到远程主机；在本地工作区中打开终端 → 照常启动本地 shell。
 
-> ⚠️ 终端透明接入仅支持**密钥认证**（密码无法安全传入 wrapper 脚本）。密码认证的连接仍可使用模型工具。
+> ⚠️ 终端透明接入仅支持**密钥认证**（密码无法安全传入 wrapper 脚本）。密码认证的连接仍可使用模型工具和远程文件操作。
 > 若需覆盖自动配置，在 profile 的 `cordis.patch.yml` 中加一条 `id: better-sidebar` 的 `config.shell` 即可（profile patch 优先于 bundle patch）。
 
 ### 4. 远程工作区（🌐）
 
 1. 打开 DSH 原生「添加工作区」流程；
 2. 选择「**选择远程目录…**」→ 选择连接 → 浏览并选择远程目录；
-3. 插件在本地生成镜像目录 `~/.dsh/remote-workspaces/<id>`，写入 `.remote-ssh.json`（连接信息，供 shell wrapper 读取），自动同步远程文件，并注册进原生工作区列表（标题 `🌐 <名称>`）；
+3. 插件在本地生成镜像目录 `~/.dsh/remote-workspaces/<id>`，写入 `.remote-ssh.json`（连接信息，供 shell wrapper 和 fs.* 拦截器读取），并注册进原生工作区列表（标题 `🌐 <名称>`）；
 4. 从工作区创建会话后，会话工作目录即该镜像目录，模型工具自动感知对应的远程连接与目录。
 
 ### 5. 模型工具（🤖）
 
-插件向模型注册 5 个工具，模型可直接操作远程环境：
+插件向模型注册 12 个工具，模型可直接操作远程环境：
 
 | 工具 | 用途 |
 | --- | --- |
@@ -121,7 +124,7 @@ dsh-remote-ssh/
 ├── package.json       # npm 元数据 + dsh.bundle / dsh.client 声明
 ├── cordis.patch.yml   # bundle 挂载补丁（install 时加入 profile bundle 栈）
 ├── lib/
-│   ├── index.js       # Host 半边（SSH + settings + 5 个工具 + HTTP API）
+│   ├── index.js       # Host 半边（SSH + settings + 12 个工具 + HTTP API + fs.* 拦截）
 │   └── client.js      # Client 半边（better-sidebar 页签 + 设置小节 + i18n）
 ├── LICENSE
 ├── CHANGELOG.md
@@ -133,28 +136,32 @@ dsh-remote-ssh/
 ```
 浏览器 (Client 半边)                     Node 进程 (Host 半边)
 ┌───────────────────────────────┐  fetch  ┌──────────────────────────────────┐
-│ ctx.betterSidebar.registerTab  │ ──────▶ │ ctx.webServer /remote-ssh/api/*  │
-│  · remssh:editor (隐藏)        │ ◀────── │  · SSH：listDir/readFile/…       │
-│ ctx.slots: settings.section    │  JSON   │  · settings：profiles/workspaces  │
-│  · 连接配置 + 工作区管理       │         │  · 自动同步 + shell wrapper 生成  │
-│ ctx.slots: directoryFlow       │         │ ctx.tools：12 个 remote_ssh_*    │
-│  · 本地 / 远程目录两选弹窗     │         └───────────────┬──────────────────┘
-└───────────────────────────────┘                          │ SSH
-                                              ┌─────────────┴──────────┐
-                                              │ ~/.dsh/remote-ssh/    │
-                                              │  dsh-remote-shell.js   │
-                                              │  dsh-remote-shell[.cmd]│ ← better-sidebar shell 指向此文件
-                                              └────────────────────────┘
-                                                     远程超算 / 服务器
+│ ctx.betterSidebar.registerTab  │ ──────▶ │ ctx.webServer                    │
+│  · remssh:editor (隐藏)        │ ◀────── │  · /sidebar/api/fs.* (exact)    │
+│ ctx.slots: settings.section    │  JSON   │    拦截 better-sidebar 的 fs API  │
+│  · 连接配置 + 工作区管理       │         │    远程→SSH  /  本地→本地 fs     │
+│ ctx.slots: directoryFlow       │         │  · /remote-ssh/api/* (prefix)    │
+│  · 本地 / 远程目录两选弹窗     │         │    listDir/readFile/writeFile/…  │
+└───────────────────────────────┘         │  · settings + shell wrapper 生成 │
+                                          │ ctx.tools：12 个 remote_ssh_*    │
+                                          └───────────────┬──────────────────┘
+                                                          │ SSH
+                                          ┌───────────────┴──────────────┐
+                                          │ ~/.dsh/remote-ssh/           │
+                                          │  dsh-remote-shell.js         │
+                                          │  dsh-remote-shell[.cmd]      │ ← better-sidebar shell 指向此文件
+                                          └─────────────────────────────┘
+                                                  远程超算 / 服务器
 ```
 
 关键设计：
 
+- **fs.* 拦截（核心）**：注册 4 个 exact 路由（`/sidebar/api/fs.tree` 等），在 `match()` 中 exact 优先于 prefix 检查，从而拦截 better-sidebar 的 fs API。当会话 cwd 含 `.remote-ssh.json` 时走 SSH，否则走本地 fs。
+- **路径透明映射**：客户端看到的是本地镜像路径，Host 拦截器自动转换为远程路径，通过 SSH 执行后返回结果。对客户端完全透明。
 - **免 shell 引号转义**：远程命令通过 `subprocess.spawn({ argv })` 以参数数组调起 `ssh.exe`，避免引号 / 空格问题。
 - **二进制安全读文件**：远程 `base64 -w0` 输出，Host 用 `Buffer` 解码为 UTF-8。
 - **写文件走 stdin**：远程 `cat > <file>`，内容经子进程 stdin 传入。
 - **文件列举**：`find -printf '%Y\t%f\t%s\n'`（`%Y` 跟随软链接取目标类型，适配超算家目录软链接）。
-- **自动同步**：创建远程工作区时立即 `tar | ssh` 拉取远程文件到本地镜像，使内置「文件」页签可见真实远程文件。
 - **Shell wrapper**：插件启动时生成跨平台 wrapper 脚本（Node.js + 薄壳），检测工作区 `.remote-ssh.json` 自动 SSH，使内置「终端」页签透明接入远程。
 - **国际化**：Client 接入 `ctx.locale`，注册 `zh` / `en` 词典，界面与工具描述跟随 DSH 语言自动切换。
 
@@ -163,17 +170,15 @@ dsh-remote-ssh/
 1. **终端透明接入仅限密钥认证**：shell wrapper 通过 `.remote-ssh.json` 读取密钥路径，密码认证无法安全传入。密码认证的连接仍可使用模型工具和远程文件操作。
 2. **文件操作依赖 GNU 工具**（`find -printf`、`base64 -w0`）：目标为 Linux 超算时通用。
 3. **密码认证需本机 `sshpass`**（Windows 默认没有）；密钥认证无此依赖。
-4. **同步为全量 tar**：`remote_ssh_sync` / `remote_ssh_push` 用 `tar` 流式全量同步，单次同步大目录耗时与传输量较高，后续可换 `rsync -e ssh` 增量。
-5. **内置编辑器编辑的是本地镜像副本**，不会自动回传 —— 须在设置页点「推送」或调用 `remote_ssh_push` 同步回远端。
+4. **fs.search 远程搜索**返回的路径为相对于远程根目录的相对路径，客户端拼接为本地镜像路径格式显示。
 
 ## 路线图
 
 - [x] 从 `~/.ssh/config` 自动导入连接
 - [x] ProxyJump / 跳板机、SSH config 复用
-- [x] `tar`-over-ssh 双向同步（`scp` / `sftp` 增量同步为后续优化）
-- [x] 远程文件合并到内置「文件」页签（自动同步 + 镜像）
+- [x] 远程文件合并到内置「文件」页签（fs.* 拦截 + 直接 SSH 读写，无需同步）
 - [x] 远程终端合并到内置「终端」页签（shell wrapper 透明 SSH）
-- [ ] `rsync -e ssh` 增量同步
+- [x] 远程工作区目录选择器（本地/远程两选，不依赖 browse capability）
 - [ ] 密码凭据走 `credentials` 服务（避免明文进 argv）
 
 ## 许可证
