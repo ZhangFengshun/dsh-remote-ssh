@@ -2,6 +2,17 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [1.6.0] — 远程搜索与文件操作工具
+### 新增
+- **内容搜索 `remote_ssh_grep`**：在远端递归搜索文件内容（`grep -rnIE`，扩展正则），支持 `include` 文件名过滤（如 `*.py`）、`ignoreCase` 忽略大小写、`maxResults` 限流（默认 200）。借鉴 dsh-remote / dsh-remote-ssh 的远程搜索，但用通用 GNU grep（超算/Linux 通用，不依赖 ripgrep）。
+- **文件名查找 `remote_ssh_glob`**：按通配符查找远程文件（`find -name`，递归），自动剥离前导 `**/` 以适配 POSIX find。
+- **创建目录 `remote_ssh_mkdir`**：`mkdir -p`（含父目录）。
+- **删除 `remote_ssh_delete`**：删除远程文件或目录（`rm -rf`，递归不询问，⚠️ 不可恢复）。
+- **移动/重命名 `remote_ssh_move`**：`mv` 移动或重命名文件/目录。
+- 上述 5 个工具均会话感知：在远程工作区会话中免填 `profileId`，相对路径基于工作区远程目录解析。
+- 「远程文件」页签新增操作栏（选中工作区或连接时显示）：🔍 搜索 / 按名查找 / 新建目录 / 重命名移动 / 删除，均以弹窗形式执行并就地显示结果。
+- 远程工作区镜像目录的 `README.md` 补全新增工具说明。
+
 ## [1.5.0] — 导入 OpenSSH 配置 + 双向同步
 ### 新增
 - **从 `~/.ssh/config` 导入连接**：设置小节「从 ~/.ssh/config 导入…」按钮读取本机 OpenSSH 用户配置（递归解析 `Include`），多选主机后批量导入为连接配置（`HostName` / `User` / `Port` / `IdentityFile` / `ProxyJump` 一并带入）。借鉴 Yan-Zero `dsh-remote-ssh`，免去逐条手动录入。

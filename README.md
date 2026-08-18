@@ -14,7 +14,7 @@
 | 💻 远程终端 | 在 better-sidebar「远程终端」页签打开 `ssh -tt` 集成终端，支持多终端并发 |
 | 🔄 双向同步 | `remote_ssh_sync`（远端 → 本地镜像）/ `remote_ssh_push`（本地镜像 → 远端），tar 流式管道，同步后内置文件工具可见 |
 | 🌐 远程工作区 | 选择远程目录创建**原生工作区**（本地镜像目录 + 原生注册），一键打开进入远程环境 |
-| 🤖 模型工具 | 7 个 `remote_ssh_*` 工具，模型可读写远程文件、执行远程命令、双向同步；在远程工作区会话中免填连接参数 |
+| 🤖 模型工具 | 12 个 `remote_ssh_*` 工具，模型可读写远程文件、执行远程命令、内容搜索、文件名查找、目录/删除/移动、双向同步；在远程工作区会话中免填连接参数 |
 | 🌍 国际化 | 界面文案 + 工具描述中英双语，通过 `ctx.locale` 跟随 DSH 语言设置自动切换 |
 | 🧠 会话记忆 | 切换会话后，「远程文件」「远程终端」页签记住已选连接、浏览目录、打开的文件与终端 |
 
@@ -29,7 +29,7 @@ dsh plugin --profile <name> add /absolute/path/to/dsh-remote-ssh
 ### 发布后安装
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.5.0
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.6.0
 ```
 
 > ⚠️ 安装后需**重启 DSH** 才生效；后续仅修改 Client 半边时刷新浏览器即可。
@@ -90,6 +90,11 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@1.5.0
 | `remote_ssh_write` | 写入远程文件（覆盖写入） |
 | `remote_ssh_sync` | 远端文件同步到本地镜像目录（tar 流式管道） |
 | `remote_ssh_push` | 本地镜像目录推送回远端（tar 流式管道） |
+| `remote_ssh_grep` | 递归搜索远程文件内容（grep -rnIE，支持 include/ignoreCase） |
+| `remote_ssh_glob` | 按通配符查找远程文件（find -name，递归） |
+| `remote_ssh_mkdir` | 创建远程目录（mkdir -p） |
+| `remote_ssh_delete` | 删除远程文件或目录（rm -rf，⚠️ 不可恢复） |
+| `remote_ssh_move` | 移动/重命名远程文件或目录（mv） |
 
 **会话感知**：当会话是从远程工作区创建时，模型调用这些工具可**不填** `profileId` / `host` / `user` 等连接参数，自动复用该工作区的连接，相对路径基于该工作区远程目录解析。
 
@@ -116,7 +121,7 @@ dsh-remote-ssh/
 │  · 远程文件 / 远程终端        │ ◀────── │  · SSH：listDir/readFile/…       │
 │ ctx.slots: settings.section   │  JSON   │  · settings：profiles/workspaces  │
 │  · DSH 设置页「远程连接」      │         │  · terminals：ssh -tt 管道        │
-└───────────────────────────────┘         │ ctx.tools：7 个 remote_ssh_*     │
+└───────────────────────────────┘         │ ctx.tools：12 个 remote_ssh_*    │
                                           └───────────────┬──────────────────┘
                                                           │ SSH
                                                      远程超算 / 服务器
