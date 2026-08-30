@@ -2,6 +2,19 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.2.0] — 远程命令连接复用（实测 ≈15× 提速）+ 协议/安全加固
+### 性能
+- **`remote_ssh_exec` 走持久会话池**：不再每次调用做完整 SSH 握手。真实 HPC（ssh.cn-zhongwei-1.paracloud.com，2222 端口）实测：一次性连接单命令平均 **1292ms**，连接复用后单命令平均 **84.3ms**，**约 15.3× 提速**；`stdin` 参数经 heredoc 走同一条复用通道。
+- **stderr/stdout 分离语义保留**：stderr 重定向到远端临时文件、退出码哨兵后 cat 回传并以第二个哨兵收尾（双哨兵协议）。
+- **读路径保持轻量**：`ls`/`cat`/`grep`/`glob` 继续走 `2>&1` 合并协议，热路径避开子 shell 与临时文件开销。
+- **大文件读取先 stat**：超过 4MB 只读前 4MB（`head -c` 截断并标记 truncated），不再让持久会话缓冲无限增长。
+### 安全 / 健壮性
+- **会话输出硬上限 8MB**：单条命令哨兵到达前缓冲超限即重置会话并给出明确报错，防止远端海量输出撑爆内存。
+- **密钥认证非交互连接加 `-o BatchMode=yes -o PreferredAuthentications=publickey`**：带口令的私钥/意外交互立即失败并返回可读提示（不再挂到超时），同时缩短建连时间；交互式终端（`ssh -tt`）不受影响。
+- **分离协议用双层子 shell**：用户命令中的 `exit`/`cd` 不再弄挂共享会话（内层子 shell 隔离，实测远端 `exit 7` 后会话存活且退出码正确传回）。
+- **写入上限 4MB**：超限直接拒绝并给出清晰报错；写入失败现在能拿回远端 stderr（此前错误信息丢失）。
+- 配合 2.1.7 纳入的修复（`--include` 转义、stderr 排空、删除配置级联清理、keyPath `~` 展开、会话池 key 含认证信息），完成一轮兼容性/安全性全面检查。
+
 ## [2.1.7] — 兼容 DSH Desktop ≥ 2.0.4：polyfill __DSH_MODULES__ + 可靠性/安全修复
 ### 修复
 - **__DSH_MODULES__ polyfill**：better-sidebar 0.15+ 的懒加载 chunk（编辑器等）依赖 `globalThis.__DSH_MODULES__`，而 DSH Desktop ≥ 2.0.4 的 shell 不再挂载该全局，导致侧边栏面板打不开（"chunk ... client module system unavailable"）。Client 半边启动时用内核 `modules` 服务补挂该全局（better-sidebar 已注入则保持原值），并带定期兜底重试。
