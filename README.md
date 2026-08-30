@@ -17,7 +17,7 @@
 ## 安装
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.1.0
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.1.7
 ```
 
 > 安装后需**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。

@@ -17,7 +17,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 ## Installation
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.1.0
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.1.7
 ```
 
 > **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.

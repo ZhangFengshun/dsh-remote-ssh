@@ -2,6 +2,49 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.1.7] — 兼容 DSH Desktop ≥ 2.0.4：polyfill __DSH_MODULES__ + 可靠性/安全修复
+### 修复
+- **__DSH_MODULES__ polyfill**：better-sidebar 0.15+ 的懒加载 chunk（编辑器等）依赖 `globalThis.__DSH_MODULES__`，而 DSH Desktop ≥ 2.0.4 的 shell 不再挂载该全局，导致侧边栏面板打不开（"chunk ... client module system unavailable"）。Client 半边启动时用内核 `modules` 服务补挂该全局（better-sidebar 已注入则保持原值），并带定期兜底重试。
+- **持久会话 stderr 排空**：SSH 会话的 stderr 管道此前无人消费，写满后远端 ssh 进程阻塞、会话假死；现在持续排空并保留最近 64KB，会话意外关闭时报错会附带最近 stderr 尾部，便于排查断连原因。
+- **修复 `remote_ssh_grep` 命令注入**：`--include` 参数此前未做 shell 转义，可通过构造参数在远端执行任意命令；现已与其它参数一样经 `shellQuote` 引用。
+- **删除连接配置时级联清理**：删除 profile 时同步删除其远程工作区的原生注册与本地镜像目录（复用统一的 `cleanupWorkspace`），不再留下指向已删配置的孤儿工作区。
+- **密钥路径支持 `~` 展开**：`keyPath` 按 `~`、`~/` 前缀展开为绝对路径，与设置界面占位符（`~/.ssh/id_rsa`）行为一致。
+- **会话池 key 纳入认证信息**：修改连接配置的 keyPath/authMethod 后立即重建 SSH 会话，不再复用旧连接。
+- 清理每次文件请求的 `console.log` 调试输出（改走 `ctx.logger.debug`）；`localToRemote` 对镜像目录之外的路径不再静默拼出错误远程路径。
+- 文档：补全 2.1.0 以来缺失的 CHANGELOG 条目；README 安装命令版本号同步为 2.1.7。
+
+## [2.1.6] — P0 打磨：远程下载 / 流式上传完善 / 远程 Git / 重连
+### 修复 / 改进
+- **远程文件下载与媒体预览**：拦截 better-sidebar 的 `/sidebar/file`（同路径 exact 路由优先），远程工作区中的文件直接从远端 base64 拉回（上限 64MB），本地照旧。
+- **流式上传**：`/remote-ssh/upload` 把请求体直接管道到远端 `cat > target`（二进制安全、恒定内存），请求中断时终止远端进程。
+- **远程 Git 面板**：拦截 `/sidebar/api/git.*`（status/diff/log/branch/commit-diff/show/stage/unstage/commit/checkout/discard/revert/cherry-pick），远程工作区中在远端目录执行同语义 git 命令。
+- **SSH 失败修复建议**：端口转发占用 / 公钥认证失败 / 连接拒绝 / 超时 / 域名解析失败翻译为带修复建议的中文提示。
+
+## [2.1.5] — 同步 better-sidebar 0.15+ 上传到远程工作区
+### 修复
+- better-sidebar 0.15+ 的上传 UI 直连 `/sidebar/upload`，远程工作区镜像目录会导致文件只落在本地镜像。Client 半边包装 `fetch`：目标目录位于远程工作区镜像内时把上传重定向到 `/remote-ssh/upload`，经 SSH 直接写远端。
+
+## [2.1.4] — 修复远程工作区标题卡在镜像目录名
+### 修复
+- `workspaceRegistry.create` 只对新建记录应用 title，旧工作区（早期版本未传 title）标题卡在镜像目录名（如 `wmt3tev5cdfge`）。创建时显式 `setTitle`，并新增启动自愈 `healWorkspaceTitles`（仅在标题等于镜像目录 basename 时修复，不覆盖用户自定义标题）。
+
+## [2.1.3] — 远程工作区标题默认取远程路径最后一段
+### 改进
+- 创建远程工作区时的默认标题改为远程路径最后一段目录名（如 `~/run/zfs/codex/DSH_Test → DSH_Test`），取不到有效段时回退为 `连接名:远程路径`；原生工作区标题带 🌐 前缀。
+
+## [2.1.2] — 修复 ssh config RemoteForward 端口占用导致连接失败
+### 修复
+- 插件内部连接（文件读写 / 工具 / 同步）追加 `ClearAllForwardings=yes`；shell wrapper 追加 `ExitOnForwardFailure=no`。`~/.ssh/config` 里的 `RemoteForward` 端口被上次会话占用且 `ExitOnForwardFailure yes` 时不再导致连接直接失败。
+- 把 SSH 常见失败（端口转发占用 / 公钥认证失败 / 连接拒绝 / 超时 / 域名解析失败）翻译成带修复建议的中文提示。
+
+## [2.1.1] — 新增英文 README
+### 文档
+- 新增 README_EN.md，中英文版本互链。
+
+## [2.1.0] — README 拆分语言版本
+### 文档
+- 移除 README 内联双语，拆分为 README.md（中文）与 README_EN.md（英文）。
+
 ## [2.0.1] — 修复远程检测：从 payload.path 也查找 .remote-ssh.json
 ### 修复
 - **sessionCwd 为空时无法检测远程工作区**：客户端请求有时只带 `payload.path` 不带 `cwd`，而 `ctx.sessions.get(sessionId)` 可能返回 undefined（session 未创建或 ID 不匹配）。现改为：先尝试 `sessionCwd`，再尝试 `payload.path`，两者都会检查 `.remote-ssh.json`。
