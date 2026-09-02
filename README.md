@@ -17,7 +17,7 @@
 ## 安装
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.1.7
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.0
 ```
 
 > 安装后需**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -53,6 +53,16 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.1.7
 插件注册 4 个 exact 路由（`/sidebar/api/fs.tree`、`fs.read`、`fs.write`、`fs.search`），在 better-sidebar 的 prefix 路由之前拦截。会话 cwd 含 `.remote-ssh.json` 时走 SSH，否则走本地 fs。客户端看到的是本地镜像路径，Host 自动转换为远程路径——对客户端完全透明。
 
 Shell wrapper（`~/.dsh/remote-ssh/dsh-remote-shell[.cmd]`）检测工作区 `.remote-ssh.json`，自动 `ssh -tt` 连接远程，使内置「终端」页签透明接入。
+
+## 缓存与一致性
+
+远程读取与目录列举结果在主机侧缓存（LRU 32/64 条，TTL 5 秒）：TTL 内重复打开或切回页签 0 网络往返；过期后先做一次轻量 mtime+size 复验，未变化则免重传。写、删除、移动、建目录、上传、推送（push）、远端 exec 与 git 面板操作会自动失效相关缓存。
+
+已知限制：
+
+- 集成终端（`ssh -tt`）与远端其它进程改动的文件依赖 TTL + 复验兜底，最多 **5 秒**陈旧；
+- `/sidebar/file` 下载池化路径有效上限约 **6.29MB**，更大文件自动退回一次性连接下载（可成功，多一次重连开销）；
+- 二进制内容伪装成文本扩展名时会多一次 base64 回退往返（结果正确）。
 
 ## ❤️ 七夕快乐
 

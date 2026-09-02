@@ -17,7 +17,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 ## Installation
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.1.7
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.0
 ```
 
 > **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -53,6 +53,16 @@ In a remote-workspace session, `profileId` and other connection params can be om
 The plugin registers 4 exact routes (`/sidebar/api/fs.tree`, `fs.read`, `fs.write`, `fs.search`) that intercept better-sidebar's prefix route. When the session cwd contains `.remote-ssh.json`, requests go through SSH; otherwise local fs. The client sees local mirror paths — the Host transparently translates them to remote paths.
 
 A shell wrapper (`~/.dsh/remote-ssh/dsh-remote-shell[.cmd]`) detects the workspace's `.remote-ssh.json` and auto-launches `ssh -tt`, making the built-in **Terminal** tab transparently connect to remote.
+
+## Caching & Consistency
+
+Remote reads and directory listings are cached host-side (LRU 32/64 entries, TTL 5s): re-opening or switching back to a tab within the TTL costs 0 network round-trips; after expiry a lightweight mtime+size revalidation runs first, and unchanged files are served without re-transfer. Write, delete, move, mkdir, upload, push (syncUp), remote exec and git-panel operations automatically invalidate the affected cache entries.
+
+Known limitations:
+
+- Files changed from the integrated terminal (`ssh -tt`) or by other remote processes rely on TTL + revalidation and may be stale for up to **5 seconds**;
+- The pooled `/sidebar/file` download path has an effective limit of ≈**6.29MB**; larger files automatically fall back to a one-shot connection download (succeeds, with one extra reconnect);
+- Binary content masquerading with a text extension costs one extra base64 fallback round-trip (results are still correct).
 
 ## ❤️ Happy Qixi
 
