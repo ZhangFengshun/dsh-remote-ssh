@@ -13,14 +13,30 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 | 💻 Remote Terminal | Built-in **Terminal** tab auto-detects remote workspaces, opens SSH interactive shell |
 | 🌐 Remote Workspace | Select a remote directory to create a native workspace, one-click enter |
 | 🤖 Model Tools | 12 `remote_ssh_*` tools, session-aware with auto-filled connection params |
+| ⚡ Faster Opens | Single-roundtrip merged reads + raw text fast path + result cache (LRU + 5s TTL): first open ≈**1.31×**, repeat opens within TTL **0 round-trips**, expired revalidation **≈5×** (measured on a real HPC); `remote_ssh_exec` connection reuse **≈15×** |
+
+## Screenshots
+
+**Settings → 🖥️ Remote SSH**: connection profiles (key / password / ProxyJump bastion) · connection test · one-click import from `~/.ssh/config`
+
+<p align="center"><img src="assets/settings-remote-connections.png" width="420" alt="Settings: Remote Connections"></p>
+
+**Remote workspace session**: built-in **Files** tab browses the remote host directly (right) · built-in **Terminal** tab auto-SSHes to the HPC (right, SLURM environment shown) · 12 `remote_ssh_*` tools invoked model-side without connection params (left)
+
+<p align="center">
+  <img src="assets/remote-files-tab.webp" width="49%" alt="Built-in Files tab browsing remote files">
+  <img src="assets/remote-terminal.webp" width="49%" alt="Built-in Terminal tab auto-SSH to remote HPC">
+</p>
 
 ## Installation
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.0
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.5
 ```
 
 > **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
+>
+> The built-in **Files** tab SSH interception relies on the file API of **dsh-better-sidebar ≥ 0.15** (`/sidebar/api/fs.*` endpoints) — do not use older versions.
 
 ## Usage
 
@@ -46,17 +62,19 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.0
 | `remote_ssh_sync` | Sync remote to local mirror |
 | `remote_ssh_push` | Push local mirror back to remote |
 
-In a remote-workspace session, `profileId` and other connection params can be omitted.
+In a remote-workspace session, `profileId` and other connection params can be omitted. All file/command tools run over the persistent SSH session pool + result cache; `remote_ssh_exec` measures ≈15× faster per command.
 
 ## How It Works
 
 The plugin registers 4 exact routes (`/sidebar/api/fs.tree`, `fs.read`, `fs.write`, `fs.search`) that intercept better-sidebar's prefix route. When the session cwd contains `.remote-ssh.json`, requests go through SSH; otherwise local fs. The client sees local mirror paths — the Host transparently translates them to remote paths.
 
+Remote reads use a **single-roundtrip merged read**: one pooled command returns the `size/mtime` frame plus the file content (text extensions prefer raw transfer with byte-length + U+FFFD validation and automatic base64 fallback — results are byte-identical), combined with host-side result caching and change invalidation (see below).
+
 A shell wrapper (`~/.dsh/remote-ssh/dsh-remote-shell[.cmd]`) detects the workspace's `.remote-ssh.json` and auto-launches `ssh -tt`, making the built-in **Terminal** tab transparently connect to remote.
 
 ## Caching & Consistency
 
-Remote reads and directory listings are cached host-side (LRU 32/64 entries, TTL 5s): re-opening or switching back to a tab within the TTL costs 0 network round-trips; after expiry a lightweight mtime+size revalidation runs first, and unchanged files are served without re-transfer. Write, delete, move, mkdir, upload, push (syncUp), remote exec and git-panel operations automatically invalidate the affected cache entries.
+Remote reads and directory listings are cached host-side (read LRU 32 + listing LRU 64 entries, TTL 5s; entries >1MiB are not cached, total budget 32MB so large files never weigh down the host): re-opening or switching back to a tab within the TTL costs **0 network round-trips**; after expiry a lightweight mtime+size revalidation runs first, and unchanged files are served without re-transfer. Writes, deletes, moves, mkdir, uploads, push (syncUp), successful remote exec and mutating git subcommands automatically invalidate the affected cache entries, with a per-profile cache epoch guarding same-second same-size writes and path-space mismatches.
 
 Known limitations:
 

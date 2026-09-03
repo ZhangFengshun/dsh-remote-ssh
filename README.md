@@ -13,14 +13,30 @@
 | 💻 远程终端 | 内置「终端」页签自动检测远程工作区，SSH 交互式终端 |
 | 🌐 远程工作区 | 选择远程目录创建原生工作区，一键进入远程环境 |
 | 🤖 模型工具 | 12 个 `remote_ssh_*` 工具，会话感知免填连接参数 |
+| ⚡ 打开提速 | 单往返合并读 + raw 文本快路径 + 结果缓存（LRU + 5s TTL）：首开 ≈**1.31×**，TTL 内重复打开 **0 往返**，过期复验 **≈5×**（真实超算实测）；`remote_ssh_exec` 连接复用 **≈15×** |
+
+## 截图
+
+**设置 → 🖥️ 远程连接**：连接配置（密钥 / 密码 / ProxyJump 跳板机）· 连接测试 · 从 `~/.ssh/config` 一键导入
+
+<p align="center"><img src="assets/settings-remote-connections.png" width="420" alt="设置：远程连接"></p>
+
+**远程工作区会话**：内置「文件」页签直接浏览远程主机文件（右）· 内置「终端」页签自动 SSH 到远程超算（右，图为 SLURM 作业调度环境）· 模型免填调用 12 个 `remote_ssh_*` 工具（左）
+
+<p align="center">
+  <img src="assets/remote-files-tab.webp" width="49%" alt="内置文件页签直接浏览远程文件">
+  <img src="assets/remote-terminal.webp" width="49%" alt="内置终端页签自动 SSH 远程超算">
+</p>
 
 ## 安装
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.0
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.5
 ```
 
 > 安装后需**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
+>
+> 内置「文件」页签的 SSH 直读依赖 **dsh-better-sidebar ≥ 0.15** 的文件 API（`/sidebar/api/fs.*` 端点），请勿使用更早版本。
 
 ## 使用
 
@@ -46,17 +62,19 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.0
 | `remote_ssh_sync` | 远端同步到本地镜像 |
 | `remote_ssh_push` | 本地镜像推送回远端 |
 
-远程工作区会话中调用工具可免填 `profileId` 等连接参数。
+远程工作区会话中调用工具可免填 `profileId` 等连接参数；全部文件/命令类工具走持久 SSH 会话池 + 结果缓存，`remote_ssh_exec` 单命令实测 ≈15× 提速。
 
 ## 原理
 
 插件注册 4 个 exact 路由（`/sidebar/api/fs.tree`、`fs.read`、`fs.write`、`fs.search`），在 better-sidebar 的 prefix 路由之前拦截。会话 cwd 含 `.remote-ssh.json` 时走 SSH，否则走本地 fs。客户端看到的是本地镜像路径，Host 自动转换为远程路径——对客户端完全透明。
 
+远程读取采用**单往返合并读**：一条池化命令同时返回 `size/mtime` 帧与文件内容（文本类扩展名优先 raw 直传，字节长 + U+FFFD 双校验失败自动回退 base64，结果逐字节一致）；配合主机侧结果缓存与变更失效（见下节）。
+
 Shell wrapper（`~/.dsh/remote-ssh/dsh-remote-shell[.cmd]`）检测工作区 `.remote-ssh.json`，自动 `ssh -tt` 连接远程，使内置「终端」页签透明接入。
 
 ## 缓存与一致性
 
-远程读取与目录列举结果在主机侧缓存（LRU 32/64 条，TTL 5 秒）：TTL 内重复打开或切回页签 0 网络往返；过期后先做一次轻量 mtime+size 复验，未变化则免重传。写、删除、移动、建目录、上传、推送（push）、远端 exec 与 git 面板操作会自动失效相关缓存。
+远程读取与目录列举结果在主机侧缓存（读 LRU 32 条 + 列举 LRU 64 条，TTL 5 秒；单条 >1MiB 不缓存、总量 32MB 字节预算，防止大文件驻留拖慢宿主）：TTL 内重复打开或切回页签 **0 网络往返**；过期后先做一次轻量 mtime+size 复验，未变化则免重传。写、删除、移动、建目录、上传、推送（push）、成功的远端 exec 与变更类 git 子命令（add/reset/commit/checkout/revert/cherry-pick）会自动失效相关缓存，并以每 profile 缓存代（epoch）兜底「同秒同 size 写」等粒度盲区。
 
 已知限制：
 
