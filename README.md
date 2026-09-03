@@ -21,12 +21,13 @@
 
 <p align="center"><img src="assets/settings-remote-connections.png" width="420" alt="设置：远程连接"></p>
 
-**远程工作区会话**：内置「文件」页签直接浏览远程主机文件（右）· 内置「终端」页签自动 SSH 到远程超算（右，图为 SLURM 作业调度环境）· 模型免填调用 12 个 `remote_ssh_*` 工具（左）
+**内置「文件」页签**：直接浏览远程主机文件（右侧文件树即远程目录，编辑保存直写远程）
 
-<p align="center">
-  <img src="assets/remote-files-tab.webp" width="49%" alt="内置文件页签直接浏览远程文件">
-  <img src="assets/remote-terminal.webp" width="49%" alt="内置终端页签自动 SSH 远程超算">
-</p>
+<p align="center"><img src="assets/remote-files-tab.webp" width="820" alt="内置文件页签直接浏览远程文件"></p>
+
+**内置「终端」页签**：自动 SSH 到远程超算（图为 SLURM 作业调度环境）；左侧会话即模型免填调用 `remote_ssh_*` 工具
+
+<p align="center"><img src="assets/remote-terminal.webp" width="820" alt="内置终端页签自动 SSH 远程超算"></p>
 
 ## 安装
 

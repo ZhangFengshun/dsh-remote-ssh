@@ -21,12 +21,13 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 
 <p align="center"><img src="assets/settings-remote-connections.png" width="420" alt="Settings: Remote Connections"></p>
 
-**Remote workspace session**: built-in **Files** tab browses the remote host directly (right) · built-in **Terminal** tab auto-SSHes to the HPC (right, SLURM environment shown) · 12 `remote_ssh_*` tools invoked model-side without connection params (left)
+**Built-in Files tab**: browse the remote host directly (the right-hand tree IS the remote directory, edits save back to remote)
 
-<p align="center">
-  <img src="assets/remote-files-tab.webp" width="49%" alt="Built-in Files tab browsing remote files">
-  <img src="assets/remote-terminal.webp" width="49%" alt="Built-in Terminal tab auto-SSH to remote HPC">
-</p>
+<p align="center"><img src="assets/remote-files-tab.webp" width="820" alt="Built-in Files tab browsing remote files"></p>
+
+**Built-in Terminal tab**: auto-SSH to the HPC (SLURM environment shown); the left panel shows the model calling `remote_ssh_*` tools without connection params
+
+<p align="center"><img src="assets/remote-terminal.webp" width="820" alt="Built-in Terminal tab auto-SSH to remote HPC"></p>
 
 ## Installation
 
