@@ -37,7 +37,7 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.5
 
 > 安装后需**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
 >
-> 内置「文件」页签的 SSH 直读依赖 **dsh-better-sidebar ≥ 0.15** 的文件 API（`/sidebar/api/fs.*` 端点），请勿使用更早版本。
+> 内置「文件」页签的 SSH 直读依赖 **dsh-better-sidebar ≥ 0.15** 的文件 API（`/sidebar/api/fs.*` 端点），请勿使用更早版本；当前已逐点验证至 **dsh-better-sidebar 0.18.0**。
 
 ## 使用
 

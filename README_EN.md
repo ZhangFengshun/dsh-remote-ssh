@@ -37,7 +37,7 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.5
 
 > **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
 >
-> The built-in **Files** tab SSH interception relies on the file API of **dsh-better-sidebar ≥ 0.15** (`/sidebar/api/fs.*` endpoints) — do not use older versions.
+> The built-in **Files** tab SSH interception relies on the file API of **dsh-better-sidebar ≥ 0.15** (`/sidebar/api/fs.*` endpoints) — do not use older versions; verified point-by-point against **dsh-better-sidebar 0.18.0**.
 
 ## Usage
 
