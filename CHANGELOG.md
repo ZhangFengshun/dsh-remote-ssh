@@ -2,6 +2,11 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.3.6] — settings 注册迁移至字符串命名空间，移除 legacy 导出依赖
+### 变更
+- **不再从 `@deepseek-ai/dsh-settings` 导入 `settingsNamespace`**：该导出在 dsh-settings 中被标注为 legacy（仅为 alpha.2 之前的插件保留，未来版本可能移除）。`parseSettingsNamespace` 实为恒等函数（校验 `/^[a-z][a-z0-9-]*$/` 后原样返回），故 `register(NS, schema)` 与原 `register(settingsNamespace(NS), schema)` 存储键完全一致——零数据迁移，老用户配置无缝保留。
+- **peerDependencies 移除 `@deepseek-ai/dsh-settings`**（已无导入；`ctx.settings` 能力由 DSH 内核的 settings 服务提供，与该 npm 包导入无关），安装时少一条未解析 peer 警告。
+
 ## [2.3.5] — 地球角标样式重制：右下角、默认文件夹形状、透明底白经纬线
 ### 变更
 - **文件夹形状与默认完全一致**：不再自绘/改写文件夹几何，壳层 IconFolderOpen16/Close16 的原始路径与几何零改写，仅向工作区行首槽位 svg **追加**一个透明地球经纬线组（appendChild 不触碰 React 管理的子节点，零对账风险）。
