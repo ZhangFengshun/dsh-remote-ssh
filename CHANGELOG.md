@@ -2,6 +2,13 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.3.7] — Windows host 连接诊断增强：过滤 PQ 警告、ssh -v 诊断、跨平台测试探测
+### 修复
+- **过滤 OpenSSH「后量子 KEX」警告横幅**：新版本客户端对非 PQ 加密的 stderr 警告（三行 `** WARNING…`）与认证成败无关，此前混入错误信息会误导用户以为是不支持加密算法；现在统一过滤（错误提示、一次性连接 stderr、持久会话关闭诊断）。
+- **测试连接探测命令改为跨平台 `echo __DSH_OK__`**：旧命令尾部 `uname -a`/`pwd` 在 Windows host（cmd/PowerShell）上必然报错，导致**认证成功的 Windows host 也误报失败**。
+- **认证失败自动带 ssh -v 诊断**：测试连接认证失败时重跑一次 `ssh -v` 握手，抽取关键诊断行（私钥加载 / 公钥提供 / 服务器拒绝方法 / 口令要求）附在错误信息里，用户一眼定位失败环节。
+- **公钥失败提示覆盖 Windows 三大圈套**：① 私钥带口令 + 批处理模式无法交互输入（先 ssh-add 或去口令）；② Windows host 且用户在 Administrators 组时公钥须写入 `C:\ProgramData\ssh\administrators_authorized_keys`；③ 用户名写法（`user` / `.\user` / `user@domain`）须与手动连接一致。
+
 ## [2.3.6] — settings 注册迁移至字符串命名空间，移除 legacy 导出依赖
 ### 变更
 - **不再从 `@deepseek-ai/dsh-settings` 导入 `settingsNamespace`**：该导出在 dsh-settings 中被标注为 legacy（仅为 alpha.2 之前的插件保留，未来版本可能移除）。`parseSettingsNamespace` 实为恒等函数（校验 `/^[a-z][a-z0-9-]*$/` 后原样返回），故 `register(NS, schema)` 与原 `register(settingsNamespace(NS), schema)` 存储键完全一致——零数据迁移，老用户配置无缝保留。
