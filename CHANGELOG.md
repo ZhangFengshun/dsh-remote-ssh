@@ -2,6 +2,12 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.3.9] — 修复 git-bash 启动导致的密钥认证失败（ssh 解析钉定到系统 OpenSSH）
+### 修复
+- **Windows 下 ssh 可执行文件优先解析为系统自带 OpenSSH 的绝对路径**（`%SystemRoot%\System32\OpenSSH\ssh.exe`，存在才使用，否则回落 PATH）：此前从 **git-bash** 启动 `dsh web` 时，子进程 PATH 里 Git 自带的 MSYS2 ssh 排在系统 OpenSSH 之前，插件实际调用 Git 的 ssh——其 HOME/config/agent 语义与系统 OpenSSH 不同，导致"终端能连、测试连接 Permission denied"。ssh 主机侧忽略用户 authorized_keys 的 HPC 集中授权环境同样受此影响。
+- **终端 shell wrapper 同步修复**：生成的 `dsh-remote-shell.js` 同样优先解析系统 OpenSSH 绝对路径。
+- 非 Windows 平台、未安装系统 OpenSSH 的环境：行为与之前完全一致（回落 PATH），零破坏。
+
 ## [2.3.8] — `/remote-ssh/api` CSRF 加固（合并 PR #4 + 服务端强制校验）
 ### 安全
 - **合并 PR #4**（感谢 @anupamme / OrbisAI Security）：客户端 API 调用（`/remote-ssh/api/*`）统一携带 `x-requested-with: XMLHttpRequest` 头。
