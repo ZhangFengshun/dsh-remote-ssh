@@ -2,6 +2,11 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.3.8] — `/remote-ssh/api` CSRF 加固（合并 PR #4 + 服务端强制校验）
+### 安全
+- **合并 PR #4**（感谢 @anupamme / OrbisAI Security）：客户端 API 调用（`/remote-ssh/api/*`）统一携带 `x-requested-with: XMLHttpRequest` 头。
+- **服务端强制校验该头**（PR 的服务端半边）：`/remote-ssh/api/*` 前缀路由现在要求请求必带 `x-requested-with`，缺失返回 403 `csrf`——跨站攻击者无法在 no-cors POST 中携带非简单头（预检也会被拒），为不支持 `Sec-Fetch-*` 头的旧浏览器补上 CSRF 防线。现有 `Sec-Fetch-Site` 检查、localhost 限定与 DSH 网关认证全部保留；`fs.*`/`git.*`/上传/下载路由不受影响（其调用方为 better-sidebar 自带客户端，不带该头）。
+
 ## [2.3.7] — Windows host 连接诊断增强：过滤 PQ 警告、ssh -v 诊断、跨平台测试探测
 ### 修复
 - **过滤 OpenSSH「后量子 KEX」警告横幅**：新版本客户端对非 PQ 加密的 stderr 警告（三行 `** WARNING…`）与认证成败无关，此前混入错误信息会误导用户以为是不支持加密算法；现在统一过滤（错误提示、一次性连接 stderr、持久会话关闭诊断）。
