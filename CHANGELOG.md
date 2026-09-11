@@ -2,6 +2,12 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.1] — 设置页「远程连接」选项卡改用真实 SVG 显示器图标
+### 变更
+- **去掉标签文本里的 🖥️ emoji**：`settings.nav` 标签改为纯文本「远程连接 / Remote Connections」，不再以表情文字充当图标。
+- **替换为真实 SVG 图标**：壳层对未知 `settings.section` 一律渲染齿轮兜底，且插槽契约暂不接受自定义图标（壳层注释：Desktop-owned display glyph kept local until the upstream slot accepts icons）。沿既有 DOM 方案把兜底齿轮原位替换为**桌面显示器轮廓图标**（圆角屏幕 + 支架 + 底座，16×16，`currentColor` 跟随主题，与 DSH 原语线稿风格一致）——与 🖥️ 语义最接近的真实图标。
+- `replaceChild` 后 React 仅对已脱离文档的旧齿轮节点做属性更新，无对账冲突；设置面板按需挂载、语言切换、React 重渲染由 MutationObserver + 1s 幂等复检（`data-rssh-monitor` 判据）兜底。
+
 ## [2.4.0] — 命令级超时 + `remote_ssh_kill` 兜底恢复（issue #5）
 ### 新增
 - **命令级超时**：一条挂起的远端命令（网络卡顿 / 远端进程僵死 / 等待 stdin 的 `cat`）此前会永久占用池化会话并阻塞其后所有命令，工具调用永不返回。现在所有 SSH 命令默认 **120 秒**超时：

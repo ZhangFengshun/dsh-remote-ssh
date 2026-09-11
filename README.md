@@ -17,7 +17,7 @@
 
 ## 截图
 
-**设置 → 🖥️ 远程连接**：连接配置（密钥 / 密码 / ProxyJump 跳板机）· 连接测试 · 从 `~/.ssh/config` 一键导入
+**设置 → 远程连接**：连接配置（密钥 / 密码 / ProxyJump 跳板机）· 连接测试 · 从 `~/.ssh/config` 一键导入
 
 <p align="center"><img src="assets/settings-remote-connections.png" width="420" alt="设置：远程连接"></p>
 
@@ -32,7 +32,7 @@
 ## 安装
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.0
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.1
 ```
 
 > 安装后需**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -41,7 +41,7 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.0
 
 ## 使用
 
-1. **设置 → 🖥️ 远程连接** → 添加连接（主机/端口/用户/密钥）→ 点「测试连接」验证
+1. **设置 → 远程连接** → 添加连接（主机/端口/用户/密钥）→ 点「测试连接」验证
 2. **添加工作区** → 选「选择远程目录…」→ 选连接 → 浏览并选择远程目录
 3. 打开内置「文件」页签 → 直接显示远程文件，编辑保存直接写回远程
 4. 打开内置「终端」页签 → 自动 SSH 到远程主机（仅密钥认证）

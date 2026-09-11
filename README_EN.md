@@ -17,7 +17,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 
 ## Screenshots
 
-**Settings → 🖥️ Remote SSH**: connection profiles (key / password / ProxyJump bastion) · connection test · one-click import from `~/.ssh/config`
+**Settings → Remote SSH**: connection profiles (key / password / ProxyJump bastion) · connection test · one-click import from `~/.ssh/config`
 
 <p align="center"><img src="assets/settings-remote-connections.png" width="420" alt="Settings: Remote Connections"></p>
 
@@ -32,7 +32,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 ## Installation
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.0
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.1
 ```
 
 > **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -41,7 +41,7 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.0
 
 ## Usage
 
-1. **Settings → 🖥️ Remote SSH** → Add a connection (host/port/user/key) → Click "Test Connection"
+1. **Settings → Remote SSH** → Add a connection (host/port/user/key) → Click "Test Connection"
 2. **Add Workspace** → Choose "Select Remote Directory…" → Pick a connection → Browse and select
 3. Open the built-in **Files** tab → Remote files shown directly, edits save back to remote
 4. Open the built-in **Terminal** tab → Auto SSH to remote host (key auth only)
