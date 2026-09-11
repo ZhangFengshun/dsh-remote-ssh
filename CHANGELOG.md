@@ -2,6 +2,20 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.0] — 命令级超时 + `remote_ssh_kill` 兜底恢复（issue #5）
+### 新增
+- **命令级超时**：一条挂起的远端命令（网络卡顿 / 远端进程僵死 / 等待 stdin 的 `cat`）此前会永久占用池化会话并阻塞其后所有命令，工具调用永不返回。现在所有 SSH 命令默认 **120 秒**超时：
+  - 环境变量 `DSH_REMOTE_SSH_CMD_TIMEOUT_MS` 覆盖全局默认，`0` 禁用；
+  - `remote_ssh_exec` 新增可选参数 `timeoutMs`（长时构建/训练显式放宽预算，`0` 禁用）；
+  - 池化会话超时即**整体丢弃并自动重建**（挂起的命令仍占着共享 bash 进程，唯一可靠恢复是终止 SSH 重建），后续命令不受影响；
+  - 一次性连接（`runRemote`）超时即 `handle.terminate()`，返回带 `isTimeout` 标记的错误；
+  - 超时命令**刻意不做回退重试**（重试一条挂起的命令只会再次挂起）。
+- **新增工具 `remote_ssh_kill`**：强制关闭某个连接的池化会话，或 `all: true` 关闭全部会话，返回 `{ ok, killed, active, message }`——agent 从此拥有挂起命令的兜底恢复手段，不再只能重启 DSH。
+- 工具输出（exec 系列）新增 `isTimeout` 字段，模型可直接识别超时结果并决定恢复策略。
+
+### 兼容性验证
+- 逐点验证 **dsh-better-sidebar 0.19.0**（`fs.tree/read/write/search` 端点、`/sidebar/api` 挂载、`config.shell` 终端覆盖、client `betterSidebar` 服务与 `registerTab`、`/sidebar/upload` 上传拦截）与 **DSH 0.1.5-rc.1**（主机服务、`defineTool`/`settings.register`、UI slot、`workspaceRegistry`）全部咬合，无需代码改动。
+
 ## [2.3.9] — 修复 git-bash 启动导致的密钥认证失败（ssh 解析钉定到系统 OpenSSH）
 ### 修复
 - **Windows 下 ssh 可执行文件优先解析为系统自带 OpenSSH 的绝对路径**（`%SystemRoot%\System32\OpenSSH\ssh.exe`，存在才使用，否则回落 PATH）：此前从 **git-bash** 启动 `dsh web` 时，子进程 PATH 里 Git 自带的 MSYS2 ssh 排在系统 OpenSSH 之前，插件实际调用 Git 的 ssh——其 HOME/config/agent 语义与系统 OpenSSH 不同，导致"终端能连、测试连接 Permission denied"。ssh 主机侧忽略用户 authorized_keys 的 HPC 集中授权环境同样受此影响。

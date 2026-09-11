@@ -12,7 +12,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 | 📂 Remote Files | Built-in **Files** tab reads/writes remote files directly via SSH — no sync needed |
 | 💻 Remote Terminal | Built-in **Terminal** tab auto-detects remote workspaces, opens SSH interactive shell |
 | 🌐 Remote Workspace | Select a remote directory to create a native workspace, one-click enter |
-| 🤖 Model Tools | 12 `remote_ssh_*` tools, session-aware with auto-filled connection params |
+| 🤖 Model Tools | 13 `remote_ssh_*` tools, session-aware with auto-filled connection params; command-level timeout + `remote_ssh_kill` recovery |
 | ⚡ Faster Opens | Single-roundtrip merged reads + raw text fast path + result cache (LRU + 5s TTL): first open ≈**1.31×**, repeat opens within TTL **0 round-trips**, expired revalidation **≈5×** (measured on a real HPC); `remote_ssh_exec` connection reuse **≈15×** |
 
 ## Screenshots
@@ -32,12 +32,12 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 ## Installation
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.5
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.0
 ```
 
 > **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
 >
-> The built-in **Files** tab SSH interception relies on the file API of **dsh-better-sidebar ≥ 0.15** (`/sidebar/api/fs.*` endpoints) — do not use older versions; verified point-by-point against **dsh-better-sidebar 0.18.0**.
+> The built-in **Files** tab SSH interception relies on the file API of **dsh-better-sidebar ≥ 0.15** (`/sidebar/api/fs.*` endpoints) — do not use older versions; verified point-by-point against **dsh-better-sidebar 0.19.0** and **DSH 0.1.5-rc.1** (host services / settings / tools / slots / upload & download interception all compatible).
 
 ## Usage
 
@@ -51,7 +51,8 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.5
 | Tool | Purpose |
 | --- | --- |
 | `remote_ssh_profiles` | List saved connections + current session's remote workspace context |
-| `remote_ssh_exec` | Execute remote command |
+| `remote_ssh_exec` | Execute remote command (default 120s command timeout; `timeoutMs` to relax/disable) |
+| `remote_ssh_kill` | Force-close pooled SSH sessions (recovery for hung commands) |
 | `remote_ssh_ls` | List remote directory |
 | `remote_ssh_cat` | Read remote file |
 | `remote_ssh_write` | Write remote file |
@@ -64,6 +65,15 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.5
 | `remote_ssh_push` | Push local mirror back to remote |
 
 In a remote-workspace session, `profileId` and other connection params can be omitted. All file/command tools run over the persistent SSH session pool + result cache; `remote_ssh_exec` measures ≈15× faster per command.
+
+## Command Timeout & Recovery
+
+All SSH commands default to a **120-second** timeout (issue #5): a hung remote command (network stall, stuck remote process, `cat` waiting on stdin) can no longer occupy the session forever and block every later command.
+
+- **Automatic recovery on timeout**: the pooled session is discarded and rebuilt automatically, so subsequent commands keep working; one-shot connections terminate the SSH process;
+- **Explicit budgets**: `remote_ssh_exec` accepts `timeoutMs` (milliseconds) per call, `0` disables the timeout (long builds/training); the `DSH_REMOTE_SSH_CMD_TIMEOUT_MS` environment variable overrides the global default;
+- **Manual hatch**: `remote_ssh_kill` (or `all: true`) force-closes one or all pooled sessions at any time;
+- Timed-out commands are **never auto-retried** (retrying a hung command just hangs again) — the model decides whether to kill the session or retry differently.
 
 ## How It Works
 

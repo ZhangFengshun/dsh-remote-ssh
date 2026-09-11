@@ -12,7 +12,7 @@
 | 📂 远程文件 | 内置「文件」页签直接 SSH 读写远程文件，无需同步 |
 | 💻 远程终端 | 内置「终端」页签自动检测远程工作区，SSH 交互式终端 |
 | 🌐 远程工作区 | 选择远程目录创建原生工作区，一键进入远程环境 |
-| 🤖 模型工具 | 12 个 `remote_ssh_*` 工具，会话感知免填连接参数 |
+| 🤖 模型工具 | 13 个 `remote_ssh_*` 工具，会话感知免填连接参数；命令级超时 + `remote_ssh_kill` 兜底恢复 |
 | ⚡ 打开提速 | 单往返合并读 + raw 文本快路径 + 结果缓存（LRU + 5s TTL）：首开 ≈**1.31×**，TTL 内重复打开 **0 往返**，过期复验 **≈5×**（真实超算实测）；`remote_ssh_exec` 连接复用 **≈15×** |
 
 ## 截图
@@ -32,12 +32,12 @@
 ## 安装
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.5
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.0
 ```
 
 > 安装后需**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
 >
-> 内置「文件」页签的 SSH 直读依赖 **dsh-better-sidebar ≥ 0.15** 的文件 API（`/sidebar/api/fs.*` 端点），请勿使用更早版本；当前已逐点验证至 **dsh-better-sidebar 0.18.0**。
+> 内置「文件」页签的 SSH 直读依赖 **dsh-better-sidebar ≥ 0.15** 的文件 API（`/sidebar/api/fs.*` 端点），请勿使用更早版本；当前已逐点验证至 **dsh-better-sidebar 0.19.0** 与 **DSH 0.1.5-rc.1**（主机服务 / settings / tools / slot / 上传下载拦截全部咬合）。
 
 ## 使用
 
@@ -51,7 +51,8 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.5
 | 工具 | 用途 |
 | --- | --- |
 | `remote_ssh_profiles` | 列出连接配置 + 当前会话远程工作区上下文 |
-| `remote_ssh_exec` | 执行远程命令 |
+| `remote_ssh_exec` | 执行远程命令（默认 120s 命令级超时，`timeoutMs` 可放宽/禁用） |
+| `remote_ssh_kill` | 强制关闭池化 SSH 会话（挂起命令的兜底恢复） |
 | `remote_ssh_ls` | 列举远程目录 |
 | `remote_ssh_cat` | 读取远程文件 |
 | `remote_ssh_write` | 写入远程文件 |
@@ -64,6 +65,15 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.3.5
 | `remote_ssh_push` | 本地镜像推送回远端 |
 
 远程工作区会话中调用工具可免填 `profileId` 等连接参数；全部文件/命令类工具走持久 SSH 会话池 + 结果缓存，`remote_ssh_exec` 单命令实测 ≈15× 提速。
+
+## 命令超时与恢复
+
+所有 SSH 命令默认 **120 秒**超时（issue #5）：一条挂起的远端命令（网络卡顿、远端进程僵死、等待 stdin 的 `cat`）不会再永久占用会话、拖死后续命令。
+
+- **超时后自动恢复**：池化会话超时即被丢弃并自动重建，后续命令照常执行；一次性连接超时即终止 SSH 进程；
+- **显式放宽**：`remote_ssh_exec` 传 `timeoutMs`（毫秒）覆盖单次预算，`0` 禁用超时（长时构建/训练）；环境变量 `DSH_REMOTE_SSH_CMD_TIMEOUT_MS` 覆盖全局默认；
+- **手动兜底**：`remote_ssh_kill`（或 `all: true`）强制关闭某个/全部池化会话，挂起命令随时可清理；
+- 超时命令**不做自动重试**（重试一条挂起的命令只会再次挂起），由模型决定是否改用 `remote_ssh_kill` 或换命令重试。
 
 ## 原理
 
