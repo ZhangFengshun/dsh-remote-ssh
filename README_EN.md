@@ -32,12 +32,14 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 ## Installation
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.1
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.3
 ```
 
 > **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
 >
-> The built-in **Files** tab SSH interception relies on the file API of **dsh-better-sidebar ≥ 0.15** (`/sidebar/api/fs.*` endpoints) — do not use older versions; verified point-by-point against **dsh-better-sidebar 0.19.0** and **DSH 0.1.5-rc.1** (host services / settings / tools / slots / upload & download interception all compatible).
+> The built-in **Files** tab SSH interception relies on the file API of **dsh-better-sidebar ≥ 0.15** (`/sidebar/api/fs.*` endpoints) — do not use older versions.
+>
+> ⚠️ **Version compatibility (measured 2026-09)**: `dsh-better-sidebar` **0.18.1 / 0.19.0 / 0.19.1** cannot load their host half on DSH Desktop v2.0.9 (DSH 0.1.5-rc.1) — they value-import `SessionLogOffset`, which the current DSH plugin-facing module surface exposes only as a type, so the import throws and the sidebar Files tab falls back to "Nothing here can view this kind of content yet." Use **0.18.0** (verified point-by-point) until upstream fixes it; this plugin supports both contracts (4 endpoints on 0.18, 6 including `fs.rename`/`fs.remove` on 0.19).
 
 ## Usage
 
@@ -77,7 +79,7 @@ All SSH commands default to a **120-second** timeout (issue #5): a hung remote c
 
 ## How It Works
 
-The plugin registers 4 exact routes (`/sidebar/api/fs.tree`, `fs.read`, `fs.write`, `fs.search`) that intercept better-sidebar's prefix route. When the session cwd contains `.remote-ssh.json`, requests go through SSH; otherwise local fs. The client sees local mirror paths — the Host transparently translates them to remote paths.
+The plugin registers 6 exact routes (`/sidebar/api/fs.tree`, `fs.read`, `fs.write`, `fs.search`, plus `fs.rename` and `fs.remove` added by better-sidebar 0.19) that intercept better-sidebar's prefix route. When the session cwd contains `.remote-ssh.json`, requests go through SSH; otherwise local fs. The client sees local mirror paths — the Host transparently translates them to remote paths.
 
 Remote reads use a **single-roundtrip merged read**: one pooled command returns the `size/mtime` frame plus the file content (text extensions prefer raw transfer with byte-length + U+FFFD validation and automatic base64 fallback — results are byte-identical), combined with host-side result caching and change invalidation (see below).
 

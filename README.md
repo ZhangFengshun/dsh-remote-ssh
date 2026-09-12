@@ -32,12 +32,14 @@
 ## 安装
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.1
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.3
 ```
 
 > 安装后需**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
 >
-> 内置「文件」页签的 SSH 直读依赖 **dsh-better-sidebar ≥ 0.15** 的文件 API（`/sidebar/api/fs.*` 端点），请勿使用更早版本；当前已逐点验证至 **dsh-better-sidebar 0.19.0** 与 **DSH 0.1.5-rc.1**（主机服务 / settings / tools / slot / 上传下载拦截全部咬合）。
+> 内置「文件」页签的 SSH 直读依赖 **dsh-better-sidebar ≥ 0.15** 的文件 API（`/sidebar/api/fs.*` 端点），请勿使用更早版本。
+>
+> ⚠️ **版本兼容性（2026-09 实测）**：`dsh-better-sidebar` **0.18.1 / 0.19.0 / 0.19.1** 在 DSH Desktop v2.0.9（DSH 0.1.5-rc.1）上**主机半边无法加载**——它们以值方式导入 `SessionLogOffset`，而当前 DSH 面向插件的模块面只提供该类型声明，导入直接抛错，导致侧边栏文件页签显示「这类内容还没有可用的查看方式。」。请使用 **0.18.0**（本插件已逐点验证）直到上游修复；本插件对 0.18（4 端点）与 0.19（6 端点，含 `fs.rename`/`fs.remove`）两套契约均已适配。
 
 ## 使用
 
@@ -77,7 +79,7 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.1
 
 ## 原理
 
-插件注册 4 个 exact 路由（`/sidebar/api/fs.tree`、`fs.read`、`fs.write`、`fs.search`），在 better-sidebar 的 prefix 路由之前拦截。会话 cwd 含 `.remote-ssh.json` 时走 SSH，否则走本地 fs。客户端看到的是本地镜像路径，Host 自动转换为远程路径——对客户端完全透明。
+插件注册 6 个 exact 路由（`/sidebar/api/fs.tree`、`fs.read`、`fs.write`、`fs.search`，以及 better-sidebar 0.19 新增的 `fs.rename`、`fs.remove`），在 better-sidebar 的 prefix 路由之前拦截。会话 cwd 含 `.remote-ssh.json` 时走 SSH，否则走本地 fs。客户端看到的是本地镜像路径，Host 自动转换为远程路径——对客户端完全透明。
 
 远程读取采用**单往返合并读**：一条池化命令同时返回 `size/mtime` 帧与文件内容（文本类扩展名优先 raw 直传，字节长 + U+FFFD 双校验失败自动回退 base64，结果逐字节一致）；配合主机侧结果缓存与变更失效（见下节）。
 

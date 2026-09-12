@@ -2,6 +2,18 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.3] — 适配 better-sidebar 0.19 新增端点（fs.rename / fs.remove）+ 版本兼容性核查
+### 新增
+- **拦截 better-sidebar 0.19 新增的 `fs.rename` / `fs.remove` 端点**（exact 路由从 4 条增至 6 条）：远程工作区的「重命名 / 删除」此前会落到本地镜像目录（0.19 之前 better-sidebar 没有这两个端点，操作走客户端 API，不存在该问题）。现在：
+  - 远程工作区 → 走 SSH（`mv -f --` / `rm -rf --`），语义对齐 better-sidebar（单个路径段校验、目标已存在返回 409、禁止操作工作区根），并失效相关读/列举缓存；
+  - 本地工作区 → 本地实现（不覆盖、lstat 判定符号链接、目录递归删除），契约与 better-sidebar 完全一致；
+  - 旧版 better-sidebar（无此端点）不调用这两个路由，注册无副作用。
+
+### 兼容性核查（重要）
+- **dsh-better-sidebar 0.19.0 / 0.19.1（以及 0.18.1）在当前 DSH Desktop（v2.0.9，DSH 0.1.5-rc.1）上主机半边无法加载**：其 `lib/index.js` 以**值**方式导入 `SessionLogOffset`（`import { SessionLogOffset } from "@deepseek-ai/dsh-session"`），而 DSH 2.0.9 面向插件的模块面只提供该符号的**类型**声明，运行时导入抛 `does not provide an export named 'SessionLogOffset'` → better-sidebar 主机半边（fs/git/terminal/jobs 等全部 API）整体失效，侧边栏文件页签因此回落到「这类内容还没有可用的查看方式。」
+- **已验证的版本矩阵**：`0.19.1`（导入该符号）、`0.19.0`（导入）、`0.18.1`（导入）→ 在 DSH 2.0.9 上不可用；`0.18.0`、`0.17.1`（不导入）→ 可用。本插件在 `0.18.0` 上逐点验证：`fs.tree/read/write/search` 返回形状、`betterSidebar` 服务与 `registerTab`、`/sidebar/upload` 上传拦截全部咬合。
+- 建议：在 better-sidebar 修复该导入（或 DSH 恢复该运行时导出）之前，desktop profile 使用 **dsh-better-sidebar@0.18.0**；本插件对 0.18/0.19 两套契约均已适配。
+
 ## [2.4.2] — 修复设置导航显示器图标「先齿轮后显示器」闪现
 ### 修复
 - **图标替换从防抖路径改为同步执行**：此前设置面板挂载后，显示器图标替换走 500ms 防抖定时器，用户会先看到半秒壳层默认齿轮再变成显示器图标。现在在 MutationObserver 回调里**同步原位替换**——回调是微任务、在浏览器绘制前执行，齿轮刚插入 DOM 就被换掉，**第一帧即最终图标**，无闪现。
