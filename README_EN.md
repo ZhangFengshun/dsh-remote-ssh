@@ -4,6 +4,8 @@ English | [中文](./README.md)
 
 A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via SSH, and directly operate remote files and terminals within DSH's built-in **Files** and **Terminal** sidebar tabs.
 
+**Contents**: [Features](#features) · [Screenshots](#screenshots) · [Installation](#installation) · [Usage](#usage) · [Examples](#examples) · [Model Tools](#model-tools) · [Command Timeout & Recovery](#command-timeout--recovery) · [Compatibility](#compatibility) · [Troubleshooting](#troubleshooting) · [How It Works](#how-it-works) · [Caching & Consistency](#caching--consistency) · [License](#license)
+
 ## Features
 
 | Feature | Description |
@@ -31,22 +33,107 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 
 ## Installation
 
+**Prerequisites**
+
+| Item | Requirement |
+| --- | --- |
+| DSH | ≥ 0.1.5-rc.1 (on the 0.1.2 stable line, use the v0.18.1-era plugin release) |
+| dsh-better-sidebar | ≥ 0.15 (this plugin uses its `/sidebar/api/fs.*` file API) |
+| Local SSH client | Windows: built-in OpenSSH (`%SystemRoot%\System32\OpenSSH\ssh.exe`); Linux/macOS: openssh-client |
+| Remote host | Any standard sshd (HPC / server / bastion) |
+
+**One command** (no token, API key or extra configuration needed):
+
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.3
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.4
 ```
 
-> **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
->
-> The built-in **Files** tab SSH interception relies on the file API of **dsh-better-sidebar ≥ 0.15** (`/sidebar/api/fs.*` endpoints) — do not use older versions.
->
-> ⚠️ **Version compatibility (measured 2026-09)**: `dsh-better-sidebar` **0.18.1 / 0.19.0 / 0.19.1** cannot load their host half on DSH Desktop v2.0.9 (DSH 0.1.5-rc.1) — they value-import `SessionLogOffset`, which the current DSH plugin-facing module surface exposes only as a type, so the import throws and the sidebar Files tab falls back to "Nothing here can view this kind of content yet." Use **0.18.0** (verified point-by-point) until upstream fixes it; this plugin supports both contracts (4 endpoints on 0.18, 6 including `fs.rename`/`fs.remove` on 0.19).
+**Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
+
+Uninstall:
+
+```bash
+dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
+```
+
+> ⚠️ **dsh-better-sidebar compatibility (measured 2026-09)**: `0.18.1 / 0.19.0 / 0.19.1` cannot load their host half on DSH Desktop v2.0.9 (DSH 0.1.5-rc.1) — they value-import `SessionLogOffset`, which the desktop module surface exposes only as a type — so the sidebar Files tab falls back to "Nothing here can view this kind of content yet." Use **0.18.0** or a build carrying the fix; this plugin supports both contracts (4 endpoints on 0.18, 6 including `fs.rename`/`fs.remove` on 0.19).
 
 ## Usage
 
-1. **Settings → Remote SSH** → Add a connection (host/port/user/key) → Click "Test Connection"
-2. **Add Workspace** → Choose "Select Remote Directory…" → Pick a connection → Browse and select
-3. Open the built-in **Files** tab → Remote files shown directly, edits save back to remote
-4. Open the built-in **Terminal** tab → Auto SSH to remote host (key auth only)
+**Three steps**
+
+1. **Settings → Remote SSH** → Add a connection (host / port / user / key) → Click "Test Connection"; an existing `~/.ssh/config` can be imported in one click
+2. **Add Workspace** → Choose "Select Remote Directory…" → Pick a connection → Browse and select a remote directory (it becomes a native DSH workspace)
+3. Inside that workspace session: the built-in **Files** tab shows remote files (edits save straight back to remote), and the **Terminal** tab auto-SSHes to the host (key auth only)
+
+**Just ask the model** (connection params are auto-filled inside a remote-workspace session):
+
+```text
+What's inside /home/user/project? Then fix line 20 of train.py
+Run squeue -u $USER and summarise the queue as a table
+Grep every ERROR line from the *.log files in this directory
+```
+
+## Examples
+
+**1 · Run a remote command** (`remote_ssh_exec`, 120s timeout by default):
+
+```json
+{
+  "command": "sinfo -h -o '%P %a %D %t %N' | head -20",
+  "timeoutMs": 30000
+}
+```
+
+Returns `{ ok, exitCode, stdout, stderr, error, truncated, isTimeout }` — e.g.
+
+```json
+{ "ok": true, "exitCode": 0, "stdout": "cpu* up 12 idle 8 ...\n", "stderr": "", "error": "", "truncated": false, "isTimeout": false }
+```
+
+**2 · Read / write files (no sync needed)**:
+
+```json
+{ "path": "~/project/config.yaml", "content": "lr: 0.001\nepochs: 50\n" }
+```
+
+```json
+{ "path": "~/project/train.py" }
+```
+
+`remote_ssh_cat` transfers base64 (binary-safe); `remote_ssh_write` is atomic (temp file + rename).
+
+**3 · Long jobs and hung-command recovery**:
+
+```json
+{ "command": "cd ~/project && bash run_train.sh", "timeoutMs": 0 }
+```
+
+```json
+{ "all": true }
+```
+
+`timeoutMs: 0` disables the timeout for that call; `DSH_REMOTE_SSH_CMD_TIMEOUT_MS=600000` changes the global default. Timed-out pooled sessions are discarded and rebuilt, and `remote_ssh_kill` is the manual hatch.
+
+**4 · Tool calls inside a remote workspace** (`profileId` omitted, relative paths resolve against the remote root):
+
+```json
+{ "path": "configs/exp1.yaml" }
+```
+
+**5 · Import connections from `~/.ssh/config`**: Settings → Remote SSH → "Import SSH config" → tick hosts → host / user / port / keyPath / ProxyJump are filled in.
+
+**6 · Mirror sync and push-back** (review offline, then upload in one shot):
+
+```json
+{ "workspaceId": "w_xxx" }
+```
+
+```json
+{ "workspaceId": "w_xxx" }
+```
+
+`remote_ssh_sync` pulls the remote tree into the local mirror; `remote_ssh_push` sends mirror changes back (tar over ssh, batched).
 
 ## Model Tools
 
@@ -77,6 +164,32 @@ All SSH commands default to a **120-second** timeout (issue #5): a hung remote c
 - **Manual hatch**: `remote_ssh_kill` (or `all: true`) force-closes one or all pooled sessions at any time;
 - Timed-out commands are **never auto-retried** (retrying a hung command just hangs again) — the model decides whether to kill the session or retry differently.
 
+## Compatibility
+
+**Measured matrix** (2026-09-12, all verified on real machines):
+
+| Component | Version | Status |
+| --- | --- | --- |
+| DSH | 0.1.5-rc.1 (DSH Desktop v2.0.9) | ✅ host services / settings / tools / slots / upload & download interception all compatible |
+| DSH | 0.1.2-rc.1 stable line | ✅ (the 2.3.x-era baseline) |
+| dsh-better-sidebar | 0.15.0 – 0.18.0 | ✅ `fs.tree/read/write/search` (4-endpoint contract) |
+| dsh-better-sidebar | 0.19.x | ⚠️ this plugin already supports the 6-endpoint contract (incl. `fs.rename`/`fs.remove`); 0.19.0/0.19.1 themselves cannot load their host half on DSH Desktop until upstream fixes it (see the warning under [Installation](#installation)) |
+| Remote sshd | standard OpenSSH (Linux / HPC / Windows) | ✅ key auth; password auth needs `sshpass` on the host (POSIX) |
+
+The plugin never patches DSH sources or injects into the profile dependency tree — everything mounts through the official `cordis.patch.yml` + profile mechanism.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+| --- | --- |
+| "Test Connection" reports `Permission denied (publickey)` | ① key has a **passphrase**: the plugin runs in batch mode (`BatchMode=yes`) and cannot prompt — load it with `ssh-add` first, or strip the passphrase; ② on a Windows host where the user is in Administrators, the public key must go to `C:\ProgramData\ssh\administrators_authorized_keys`; ③ the username spelling (`user` / `.\user` / `user@domain`) must match a manual connection |
+| Key auth fails after launching `dsh web` from git-bash | Fixed in 2.3.9: on Windows the ssh binary is pinned to the system OpenSSH absolute path (previously Git's MSYS2 ssh was picked up) |
+| Sidebar Files tab says "Nothing here can view this kind of content yet." | `dsh-better-sidebar` host half failed to load: 0.18.1 / 0.19.0 / 0.19.1 hit the `SessionLogOffset` runtime import on DSH Desktop — downgrade to 0.18.0 or use a fixed build (upstream PR [#641](https://github.com/omdsh-dev/DSH-better-sidebar/pull/641)) |
+| Built-in Terminal tab cannot connect | The terminal is an `ssh -tt` interactive channel and supports **key auth only**; use the Files tab and the model tools for password auth |
+| Install fails with `minimumReleaseAge` or "No matching version" right after a release | npm supply-chain freshness policy — retry after 1–5 minutes |
+| A command hangs forever | The 120s timeout discards the pooled session automatically; use `timeoutMs: 0` for long jobs and `remote_ssh_kill` at any time |
+| Large files are truncated | 4MB per read, ≈6.29MB on the pooled download path (larger files fall back to a one-shot connection); use `remote_ssh_exec` with `head`/`tail` to page through |
+
 ## How It Works
 
 The plugin registers 6 exact routes (`/sidebar/api/fs.tree`, `fs.read`, `fs.write`, `fs.search`, plus `fs.rename` and `fs.remove` added by better-sidebar 0.19) that intercept better-sidebar's prefix route. When the session cwd contains `.remote-ssh.json`, requests go through SSH; otherwise local fs. The client sees local mirror paths — the Host transparently translates them to remote paths.
@@ -103,6 +216,14 @@ May it connect us as closely as it connects to distant supercomputers. Happy Qix
 
 —— August 18, 2026
 
+## Changelog
+
+Version history and per-release details live in [CHANGELOG.md](./CHANGELOG.md) (latest: 2.4.3 better-sidebar 0.19 endpoints, 2.4.2 settings icon flash, 2.4.0 command-level timeout + `remote_ssh_kill`).
+
 ## License
 
 [MIT](./LICENSE)
+
+---
+
+If this plugin helps you, a ⭐ [star on GitHub](https://github.com/ZhangFengshun/dsh-remote-ssh) or a favourite on [DSH Market](https://dshmarket.com) helps more people who work on remote supercomputers find it.

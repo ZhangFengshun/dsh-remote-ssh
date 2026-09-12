@@ -4,6 +4,8 @@
 
 类 **VSCode Remote-SSH** 的 **DSH** 插件：通过 SSH 连接远程超算 / 服务器，在 DSH 内置「文件」「终端」页签中直接操作远程文件和终端。
 
+**目录**：[功能](#功能) · [截图](#截图) · [安装](#安装) · [使用](#使用) · [代码示例](#代码示例) · [模型工具](#模型工具) · [命令超时与恢复](#命令超时与恢复) · [兼容性](#兼容性) · [故障排查](#故障排查) · [原理](#原理) · [缓存与一致性](#缓存与一致性) · [许可证](#许可证)
+
 ## 功能
 
 | 能力 | 说明 |
@@ -31,22 +33,107 @@
 
 ## 安装
 
+**前置要求**
+
+| 项 | 要求 |
+| --- | --- |
+| DSH | ≥ 0.1.5-rc.1（0.1.2 稳定线请用 v0.18.1 时代的插件版本） |
+| dsh-better-sidebar | ≥ 0.15（本插件依赖其 `/sidebar/api/fs.*` 文件 API） |
+| 本机 SSH 客户端 | Windows：系统自带 OpenSSH（`%SystemRoot%\System32\OpenSSH\ssh.exe`）；Linux/macOS：openssh-client |
+| 远程主机 | 任意标准 sshd（超算 / 服务器 / 跳板机均可） |
+
+**一条命令安装**（无需 token、API Key 或额外配置）：
+
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.3
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.4
 ```
 
-> 安装后需**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
->
-> 内置「文件」页签的 SSH 直读依赖 **dsh-better-sidebar ≥ 0.15** 的文件 API（`/sidebar/api/fs.*` 端点），请勿使用更早版本。
->
-> ⚠️ **版本兼容性（2026-09 实测）**：`dsh-better-sidebar` **0.18.1 / 0.19.0 / 0.19.1** 在 DSH Desktop v2.0.9（DSH 0.1.5-rc.1）上**主机半边无法加载**——它们以值方式导入 `SessionLogOffset`，而当前 DSH 面向插件的模块面只提供该类型声明，导入直接抛错，导致侧边栏文件页签显示「这类内容还没有可用的查看方式。」。请使用 **0.18.0**（本插件已逐点验证）直到上游修复；本插件对 0.18（4 端点）与 0.19（6 端点，含 `fs.rename`/`fs.remove`）两套契约均已适配。
+安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
+
+卸载：
+
+```bash
+dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
+```
+
+> ⚠️ **dsh-better-sidebar 版本兼容性（2026-09 实测）**：`0.18.1 / 0.19.0 / 0.19.1` 在 DSH Desktop v2.0.9（DSH 0.1.5-rc.1）上**主机半边无法加载**（它们以值方式导入 `SessionLogOffset`，桌面版模块面只提供该类型声明）→ 侧边栏文件页签显示「这类内容还没有可用的查看方式。」。请使用 **0.18.0**，或使用已修复该导入的构建；本插件对 0.18（4 端点）与 0.19（6 端点，含 `fs.rename`/`fs.remove`）两套契约均已适配。
 
 ## 使用
 
-1. **设置 → 远程连接** → 添加连接（主机/端口/用户/密钥）→ 点「测试连接」验证
-2. **添加工作区** → 选「选择远程目录…」→ 选连接 → 浏览并选择远程目录
-3. 打开内置「文件」页签 → 直接显示远程文件，编辑保存直接写回远程
-4. 打开内置「终端」页签 → 自动 SSH 到远程主机（仅密钥认证）
+**三步上手**
+
+1. **设置 → 远程连接** → 添加连接（主机 / 端口 / 用户 / 密钥）→ 点「测试连接」验证；已有 `~/.ssh/config` 可直接一键导入
+2. **添加工作区** → 选「选择远程目录…」→ 选连接 → 浏览并选择远程目录（该目录会成为原生 DSH 工作区）
+3. 进入该工作区会话：内置「文件」页签直接显示远程文件（编辑保存直写远程），「终端」页签自动 SSH 到远程主机（仅密钥认证）
+
+**会话内直接对模型说**（远程工作区会话中免填连接参数）：
+
+```text
+看看 /home/user/project 下有什么，然后把 train.py 的第 20 行改掉
+跑一下 squeue -u $USER，把排队情况整理成表格
+把这个目录的 *.log 里含 ERROR 的行抓出来
+```
+
+## 代码示例
+
+**示例 1 · 执行远程命令**（`remote_ssh_exec`，默认 120s 超时）：
+
+```json
+{
+  "command": "sinfo -h -o '%P %a %D %t %N' | head -20",
+  "timeoutMs": 30000
+}
+```
+
+返回 `{ ok, exitCode, stdout, stderr, error, truncated, isTimeout }`——例如：
+
+```json
+{ "ok": true, "exitCode": 0, "stdout": "cpu* up 12 idle 8 ...\n", "stderr": "", "error": "", "truncated": false, "isTimeout": false }
+```
+
+**示例 2 · 文件读写（无需同步）**：
+
+```json
+{ "path": "~/project/config.yaml", "content": "lr: 0.001\nepochs: 50\n" }
+```
+
+```json
+{ "path": "~/project/train.py" }
+```
+
+`remote_ssh_cat` 走 base64 传输（二进制安全），`remote_ssh_write` 为原子写入（写临时文件再 rename）。
+
+**示例 3 · 长时任务与挂起恢复**（构建 / 训练显式放宽，卡住可强杀会话）：
+
+```json
+{ "command": "cd ~/project && bash run_train.sh", "timeoutMs": 0 }
+```
+
+```json
+{ "all": true }
+```
+
+`timeoutMs: 0` 禁用本次超时；环境变量 `DSH_REMOTE_SSH_CMD_TIMEOUT_MS=600000` 可改全局默认。超时后池化会话自动丢弃重建，`remote_ssh_kill` 是随时可用的手动兜底。
+
+**示例 4 · 远程工作区内的工具调用**（免填 `profileId`，相对路径基于工作区远程目录）：
+
+```json
+{ "path": "configs/exp1.yaml" }
+```
+
+**示例 5 · 从 `~/.ssh/config` 导入连接**：设置 → 远程连接 → 「导入 SSH config」→ 勾选主机 → 自动填充 host / user / port / keyPath / ProxyJump。
+
+**示例 6 · 本地镜像同步与回推**（离线批改后再一次性上传）：
+
+```json
+{ "workspaceId": "w_xxx" }
+```
+
+```json
+{ "workspaceId": "w_xxx" }
+```
+
+`remote_ssh_sync` 把远端拉进本地镜像目录，`remote_ssh_push` 把镜像改动推回远端（tar over ssh，批量高效）。
 
 ## 模型工具
 
@@ -77,6 +164,32 @@ dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.3
 - **手动兜底**：`remote_ssh_kill`（或 `all: true`）强制关闭某个/全部池化会话，挂起命令随时可清理；
 - 超时命令**不做自动重试**（重试一条挂起的命令只会再次挂起），由模型决定是否改用 `remote_ssh_kill` 或换命令重试。
 
+## 兼容性
+
+**实测矩阵**（2026-09-12，均为真机验证）：
+
+| 组件 | 版本 | 状态 |
+| --- | --- | --- |
+| DSH | 0.1.5-rc.1（DSH Desktop v2.0.9） | ✅ 主机服务 / settings / tools / slot / 上传下载拦截全部咬合 |
+| DSH | 0.1.2-rc.1 稳定线 | ✅（插件 2.3.x 时代基线） |
+| dsh-better-sidebar | 0.15.0 – 0.18.0 | ✅ `fs.tree/read/write/search`（4 端点契约） |
+| dsh-better-sidebar | 0.19.x | ⚠️ 插件侧已适配 6 端点（含 `fs.rename`/`fs.remove`）；但 0.19.0/0.19.1 自身在 DSH Desktop 上主机半边无法加载，需等上游修复（见[安装](#安装)的警告） |
+| 远程主机 sshd | 标准 OpenSSH（Linux / 超算 / Windows） | ✅ 密钥认证；密码认证需本机 `sshpass`（POSIX） |
+
+插件不修改 DSH 源码、不注入 profile 依赖树，全部能力经官方 `cordis.patch.yml` + profile 机制挂载。
+
+## 故障排查
+
+| 现象 | 原因与解法 |
+| --- | --- |
+| 「测试连接」报 `Permission denied (publickey)` | ① 私钥**带口令**：插件以批处理模式运行（`BatchMode=yes`），无法交互输口令——先用 `ssh-add` 加载，或去掉密钥口令；② Windows host 且用户在 Administrators 组时，公钥须写入 `C:\ProgramData\ssh\administrators_authorized_keys`；③ 用户名的写法（`user` / `.\user` / `user@domain`）要与手动连接一致 |
+| 从 git-bash 启动 `dsh web` 后密钥认证失败 | 2.3.9 起已修复：Windows 下 ssh 解析固定为系统 OpenSSH 绝对路径（此前会误用 Git 自带的 MSYS2 ssh） |
+| 侧边栏文件页签显示「这类内容还没有可用的查看方式。」 | `dsh-better-sidebar` 主机半边未加载：0.18.1 / 0.19.0 / 0.19.1 在 DSH Desktop 上会因 `SessionLogOffset` 运行时导入失败——降到 0.18.0 或使用修复版（上游 PR [#641](https://github.com/omdsh-dev/DSH-better-sidebar/pull/641)） |
+| 内置「终端」页签连不上 | 终端为 `ssh -tt` 交互式通道，**仅支持密钥认证**；密码认证请改用「文件」页签与模型工具 |
+| 安装时提示 `minimumReleaseAge` 或「No matching version」（刚发布） | npm 供应链新鲜度策略，等 1–5 分钟后重试即可 |
+| 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
+| 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |
+
 ## 原理
 
 插件注册 6 个 exact 路由（`/sidebar/api/fs.tree`、`fs.read`、`fs.write`、`fs.search`，以及 better-sidebar 0.19 新增的 `fs.rename`、`fs.remove`），在 better-sidebar 的 prefix 路由之前拦截。会话 cwd 含 `.remote-ssh.json` 时走 SSH，否则走本地 fs。客户端看到的是本地镜像路径，Host 自动转换为远程路径——对客户端完全透明。
@@ -103,6 +216,14 @@ Shell wrapper（`~/.dsh/remote-ssh/dsh-remote-shell[.cmd]`）检测工作区 `.r
 
 —— 2026 年 8 月 18 日
 
+## 更新日志
+
+版本历史与每版修复细节见 [CHANGELOG.md](./CHANGELOG.md)（最近：2.4.3 适配 better-sidebar 0.19 端点、2.4.2 修复设置图标闪现、2.4.0 命令级超时与 `remote_ssh_kill`）。
+
 ## 许可证
 
 [MIT](./LICENSE)
+
+---
+
+如果这个插件帮到了你，欢迎在 GitHub 上点个 ⭐ [Star](https://github.com/ZhangFengshun/dsh-remote-ssh)，或到 [DSH Market](https://dshmarket.com) 收藏——这会帮助更多需要远程超算开发的人找到它。

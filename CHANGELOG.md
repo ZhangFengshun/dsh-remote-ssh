@@ -2,6 +2,14 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.4] — 文档结构补全（README 代码示例 / 兼容性矩阵 / 故障排查）
+### 文档
+- **新增「代码示例」章节**（中英双语）：6 组可直接照抄的示例——远程命令（含 `timeoutMs`）、文件读写、长时任务与挂起恢复（`timeoutMs: 0` / `remote_ssh_kill`）、远程工作区内的免参调用、`~/.ssh/config` 导入、镜像 sync/push，并给出真实返回值形状。
+- **新增「兼容性」矩阵**：逐行列出 DSH 0.1.5-rc.1 / 0.1.2 稳定线、dsh-better-sidebar 0.15–0.18（4 端点）与 0.19.x（6 端点，并标注上游主机半边加载问题）、远程 sshd 的实测状态。
+- **新增「故障排查」表**：公钥认证失败（口令密钥 / Administrators 授权文件 / 用户名写法）、git-bash 启动、文件页签「这类内容还没有可用的查看方式。」、终端仅密钥认证、`minimumReleaseAge`、命令挂起、大文件截断——每条给出原因与解法。
+- **新增「安装」前置要求表与卸载命令**、README 顶部目录导航、「更新日志」入口与 Star 引导。
+- 中文 README 与英文 README_EN 保持结构对齐。
+
 ## [2.4.3] — 适配 better-sidebar 0.19 新增端点（fs.rename / fs.remove）+ 版本兼容性核查
 ### 新增
 - **拦截 better-sidebar 0.19 新增的 `fs.rename` / `fs.remove` 端点**（exact 路由从 4 条增至 6 条）：远程工作区的「重命名 / 删除」此前会落到本地镜像目录（0.19 之前 better-sidebar 没有这两个端点，操作走客户端 API，不存在该问题）。现在：
