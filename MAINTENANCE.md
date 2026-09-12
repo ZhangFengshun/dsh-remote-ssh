@@ -107,9 +107,22 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
 
 ## 5. 维护备忘
 
+- **🚫 README 的「## ❤️ 七夕快乐」段落是固定内容，任何文档改版都不得删除、改写或移位**
+  （`README.md` 中文版 + `README_EN.md` 的 `## ❤️ Happy Qixi` 对应段落，含
+  「本项目是送给 **zhangyi** 的七夕礼物。」三行与落款日期 2026 年 8 月 18 日）。
+  这是仓库作者对所有者的私人寄语，不是可裁剪的营销文案——新增章节一律插在它**上方**
+  （「更新日志 / 许可证 / Star 引导」等尾部内容保持在其下方）。改动 README 后用
+  `grep -n 七夕 README.md` 与 `grep -n Qixi README_EN.md` 自检，并确认 GitHub main
+  与 npm 产物内均在。
 - 桌面 profile 中插件顺序要求：`dsh-better-sidebar` 在
   `@zhangfengshun/dsh-remote-ssh` 之前（README 的先后要求），不要打乱。
-- awesome-dsh-plugin 投稿已合并前仍在 PR #4268；合入后列表 README 是自动生成的，
+- awesome-dsh-plugin 投稿已合并 PR #4268（2026-09-04）；列表 README 是自动生成的，
   后续若要改条目，改的是 `data/plugins/zhangfengshun__dsh-remote-ssh.yml`。
+- DSH Market 评分（实用五维，权重 维护 30 / 实用 25 / 热度 20 / 便捷 15 / 信号 10）：
+  - **信号质量**五项完备度 = description / license / topics / **homepage** / README
+    ——GitHub 仓库 homepage 曾为空（2026-09-12 已补为 npm 页面），改仓库设置时不要清空；
+  - **实用度**看 README 结构：安装 / 使用 / **代码示例** / 功能说明——新增功能时同步补示例；
+  - **便捷度**要求「一条命令可装 + 无需 token/API Key」，不要引入需要额外配置的依赖；
+  - **热度**由真实 star / fork 决定，无法通过文档操作提升。
 - `screenshots.json`（storefront 展示图清单）与 `assets/` 截图在仓库里，发布
   README 变更时记得同步。
