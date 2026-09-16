@@ -12,7 +12,7 @@
 | --- | --- |
 | 🔌 SSH 连接 | 密钥 / 密码认证，ProxyJump 跳板机，`~/.ssh/config` 一键导入 |
 | 📂 远程文件 | 内置「文件」页签直接 SSH 读写远程文件，无需同步 |
-| 💻 远程终端 | 内置「终端」页签自动检测远程工作区，SSH 交互式终端 |
+| 💻 远程终端 | 内置「终端」页签自动检测远程工作区，SSH 交互式终端，**落在工作区对应的远程目录**（与 VSCode Remote-SSH 一致） |
 | 🌐 远程工作区 | 选择远程目录创建原生工作区，一键进入远程环境 |
 | 🤖 模型工具 | 13 个 `remote_ssh_*` 工具，会话感知免填连接参数；命令级超时 + `remote_ssh_kill` 兜底恢复 |
 | ⚡ 打开提速 | 单往返合并读 + raw 文本快路径 + 结果缓存（LRU + 5s TTL）：首开 ≈**1.31×**，TTL 内重复打开 **0 往返**，过期复验 **≈5×**（真实超算实测）；`remote_ssh_exec` 连接复用 **≈15×** |
@@ -45,7 +45,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.4
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.5
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -64,7 +64,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 
 1. **设置 → 远程连接** → 添加连接（主机 / 端口 / 用户 / 密钥）→ 点「测试连接」验证；已有 `~/.ssh/config` 可直接一键导入
 2. **添加工作区** → 选「选择远程目录…」→ 选连接 → 浏览并选择远程目录（该目录会成为原生 DSH 工作区）
-3. 进入该工作区会话：内置「文件」页签直接显示远程文件（编辑保存直写远程），「终端」页签自动 SSH 到远程主机（仅密钥认证）
+3. 进入该工作区会话：内置「文件」页签直接显示远程文件（编辑保存直写远程），「终端」页签自动 SSH 到该工作区的**远程目录**（仅密钥认证）
 
 **会话内直接对模型说**（远程工作区会话中免填连接参数）：
 
@@ -185,7 +185,8 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 「测试连接」报 `Permission denied (publickey)` | ① 私钥**带口令**：插件以批处理模式运行（`BatchMode=yes`），无法交互输口令——先用 `ssh-add` 加载，或去掉密钥口令；② Windows host 且用户在 Administrators 组时，公钥须写入 `C:\ProgramData\ssh\administrators_authorized_keys`；③ 用户名的写法（`user` / `.\user` / `user@domain`）要与手动连接一致 |
 | 从 git-bash 启动 `dsh web` 后密钥认证失败 | 2.3.9 起已修复：Windows 下 ssh 解析固定为系统 OpenSSH 绝对路径（此前会误用 Git 自带的 MSYS2 ssh） |
 | 侧边栏文件页签显示「这类内容还没有可用的查看方式。」 | `dsh-better-sidebar` 主机半边未加载：0.18.1 / 0.19.0 / 0.19.1 在 DSH Desktop 上会因 `SessionLogOffset` 运行时导入失败——降到 0.18.0 或使用修复版（上游 PR [#641](https://github.com/omdsh-dev/DSH-better-sidebar/pull/641)） |
-| 内置「终端」页签连不上 | 终端为 `ssh -tt` 交互式通道，**仅支持密钥认证**；密码认证请改用「文件」页签与模型工具 |
+| 内置「终端」页签连不上 | 终端为 `ssh -tt` 交互式通道，**仅支持密钥认证**；密码认证的连接会回退为本地 shell 并打印一行提示（避免把本地 shell 误认为已连上远程），密码认证请改用「文件」页签与模型工具 |
+| 终端落在远程 `$HOME` 而不是工作区目录 | 2.4.5 起已修复（wrapper 会 `cd` 到工作区 `remotePath`，目录不存在时回退 `$HOME`）；若仍停在 `$HOME`，确认 2.4.5 已装入并重启 DSH |
 | 安装时提示 `minimumReleaseAge` 或「No matching version」（刚发布） | npm 供应链新鲜度策略，等 1–5 分钟后重试即可 |
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |

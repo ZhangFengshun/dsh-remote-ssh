@@ -2,6 +2,18 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.5] — 集成终端落在工作区远程目录（issue #7）+ 密码认证回退提示
+### 修复
+- **「终端」页签现在落在工作区对应的远程目录**（感谢 @Linhaojing 的完整定位与验证矩阵）：此前生成的 `dsh-remote-shell.js` 只拼 host/user/port/keyPath/proxyJump，`ssh -tt` 不带远程命令，交互式 shell 落在远程 `$HOME`；同一会话里出现「文件树在工作区目录、终端在 $HOME」的割裂。现在 wrapper 读取标记文件里**已有的** `remotePath` 并追加远程命令：
+  - `~`/`~/x` 的展开交给**远端** shell（`$HOME/...`）——本地 homedir 与远程不同，本地展开必错；
+  - `cd … 2>/dev/null || cd "$HOME"`：目标目录被删/改名时回退，终端仍可打开；
+  - `exec "${SHELL:-/bin/bash}" -l`：尊重远端登录 shell（zsh/fish 等），保持单进程与退出码语义；
+  - 无 `remotePath` 的旧标记文件不追加命令，行为与 2.4.5 之前完全一致（向后兼容）。
+- **密码认证的远程工作区现在会明确提示**：集成终端仅支持密钥认证，此前静默回退为本地 shell，用户会误以为已连上远程；现在向 stderr 打印中英双语提示（本地工作区与密钥认证路径不受影响）。
+
+### 测试
+- 新增 `tests/wrapper-terminal.test.mjs`：从 `lib/index.js` 提取**真实**的 wrapper 生成文本，用 CJS runner 桩掉 `child_process` 后捕获实际 spawn argv，覆盖 5 组场景（`~/子路径`、`~`、绝对路径、无 remotePath、非密钥认证）共 16 条断言。
+
 ## [2.4.4] — 文档结构补全（README 代码示例 / 兼容性矩阵 / 故障排查）
 ### 文档
 - **新增「代码示例」章节**（中英双语）：6 组可直接照抄的示例——远程命令（含 `timeoutMs`）、文件读写、长时任务与挂起恢复（`timeoutMs: 0` / `remote_ssh_kill`）、远程工作区内的免参调用、`~/.ssh/config` 导入、镜像 sync/push，并给出真实返回值形状。
