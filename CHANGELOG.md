@@ -2,6 +2,19 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.7] — `@` 文件引用补全支持远程工作区（issue #10）
+### 新增
+- **远程工作区会话里 `@` 补全现在列远端文件**（感谢 @Linhaojing 的通道分析与挂载点核实）：`@` 补全由宿主 `ctx.fileReferences` 服务提供（官方 provider `@deepseek-ai/dsh-file-reference-local`），它只遍历**本地磁盘**——远程工作区会话的 cwd 是本地镜像目录，于是候选只有镜像里那几个文件（通常只有本插件写入的 `README.md`）。该链路不经过任何 HTTP 路由（客户端经 remote gateway 调 `ctx.fileReferences.list`），因此采用**服务层包装**：
+  - 在 `ctx.inject(["fileReferences"])` 里包装已注册的服务实例，**远程工作区自己算候选**，其余一律委托回原实现——本地会话的索引与模糊排序**零改动**，不替换 composition row，也不新增 `@deepseek-ai/*` 运行时依赖；
+  - 桥接侧动态解析服务（`dsh-api-session-controller` 的 `this.ctx.fileReferences.list(...)`），实例包装对其立即生效（已核实）；
+  - 服务缺失或不可包装时打印一条 warn 并保持原行为；卸载时自动还原原方法。
+- **查询语义与官方 provider 逐条对齐**：空查询/含 `/` 走目录列举、纯片段走模糊查询；隐藏文件仅在小片段以 `.` 开头时可见；评分常量（同名 1000 / 前缀 900 / 名称子串 700 / 路径子串 500 / 子序列 300+间隔惩罚）、目录 +25、排序 tiebreak（目录优先 → 路径短 → 字典序）、排除目录表（与上游 `DEFAULT_FILE_SEARCH_EXCLUDED_DIRECTORIES` 的 15 条一致）全部照搬。
+- **索引来源按远端实际测量取舍**：git 仓库用 `git ls-files --cached --others --exclude-standard`（真实超算实测 **0.117s / 137 条**，尊重 `.gitignore`、含未跟踪文件），非 git 回退有界 `find`（`maxdepth 5` + 剪枝，实测 **1.57s / 3121 条**）——作为对照，深遍历 `find` 在同一仓库要 **18.6s**。
+- **性能与降级**：索引按 workspace 缓存 60s 并挂到既有 `cacheEpoch`（写/exec 后自动失效）；单次查询只等 **900ms**，超时用陈旧索引或空结果作答、重建继续在后台（与本地 provider 的"陈旧索引照常回答"一致）；`AbortSignal` 已取消时直接返回空；任何异常一律降级到本地实现，绝不把光标卡在 SSH 上。
+
+### 测试
+- 新增 `tests/file-references.test.mjs`（**62 条断言**）：查询拆分、索引解析（git/find 两种帧、父路径合成目录、排除目录剪枝、符号链接跳过、CRLF、条目上限）、评分与排序（含逐条对照上游常量）、隐藏文件可见性、索引命令生成（两条分支 + 15 条排除目录）、服务包装（远程走远端 / 本地委托 / 异常降级 / 恢复函数 / 非法服务安全返回）、以及**真实 HPC 输出样例**喂给解析器。
+
 ## [2.4.6] — 「文件」页签树根显示远程目录名（issue #9）
 ### 修复
 - **树根标签不再显示本地镜像目录 ID**（感谢 @Linhaojing 的链路定位）：better-sidebar「文件」页签的树根标签取自会话 cwd（= 本地镜像路径）的 basename，于是显示成 `wmu3sxe24jpvg` 之类的镜像目录名。这条链路**不经过任何 `fs.*` 路由**，且 Host 侧 `session.cwd` 虽已返回 `root` 字段但客户端只消费 `cwd`（`api.sessionCwd(...).then(r => setFetchedCwd(r.cwd))`，另有 `useSessionCwd` 直接读客户端会话列表的 `cwd`），因此只能在渲染层替换文本。现由客户端取 `listWorkspaces` 的 `mirrorPath`/`remotePath` 建立「镜像 basename → 远程 basename」映射，把树根那一行换成**远程目录名**（如 `IB_Robot`），并给该行加 `title` 显示完整远程路径（如 `~/lhj/IB_Robot`）。

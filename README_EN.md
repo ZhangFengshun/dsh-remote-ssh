@@ -15,6 +15,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 | 💻 Remote Terminal | Built-in **Terminal** tab auto-detects remote workspaces, opens an SSH interactive shell **in the workspace's remote directory** (like VSCode Remote-SSH) |
 | 🌐 Remote Workspace | Select a remote directory to create a native workspace, one-click enter |
 | 🤖 Model Tools | 13 `remote_ssh_*` tools, session-aware with auto-filled connection params; command-level timeout + `remote_ssh_kill` recovery |
+| 🗂️ `@` Completion | In a remote-workspace session, `@` completion lists **remote** files (git repos via `git ls-files`, measured 0.1s; bounded `find` otherwise; cached index + 900ms query budget so the caret never stalls) |
 | ⚡ Faster Opens | Single-roundtrip merged reads + raw text fast path + result cache (LRU + 5s TTL): first open ≈**1.31×**, repeat opens within TTL **0 round-trips**, expired revalidation **≈5×** (measured on a real HPC); `remote_ssh_exec` connection reuse **≈15×** |
 
 ## Screenshots
@@ -45,7 +46,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.6
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.7
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -155,6 +156,15 @@ Returns `{ ok, exitCode, stdout, stderr, error, truncated, isTimeout }` — e.g.
 
 In a remote-workspace session, `profileId` and other connection params can be omitted. All file/command tools run over the persistent SSH session pool + result cache; `remote_ssh_exec` measures ≈15× faster per command.
 
+## `@` File Reference Completion
+
+In a remote-workspace session, typing `@` offers **remote** candidates (matching the Files tab tree) instead of the local mirror directory:
+
+- **Index source**: git repos use `git ls-files --cached --others --exclude-standard` (respects `.gitignore`, includes untracked files; measured 0.117s / 137 entries on a real HPC), non-git directories fall back to a bounded `find` (`maxdepth 5` + pruning, measured 1.57s / 3121 entries);
+- **Query semantics mirror the official provider**: `@` and `@src/` list a remote directory; `@read` runs the fuzzy index (exact name > prefix > name substring > path substring > subsequence, directories +25);
+- **The caret never stalls**: the index is cached per workspace for 60s (invalidated after writes/commands) and a single completion waits at most 900ms — on timeout the stale index answers and the rebuild continues in the background; connection failures fall back to local behaviour;
+- **Local workspaces are untouched**: non-remote sessions delegate straight to the host implementation.
+
 ## Command Timeout & Recovery
 
 All SSH commands default to a **120-second** timeout (issue #5): a hung remote command (network stall, stuck remote process, `cat` waiting on stdin) can no longer occupy the session forever and block every later command.
@@ -188,6 +198,7 @@ The plugin never patches DSH sources or injects into the profile dependency tree
 | Built-in Terminal tab cannot connect | The terminal is an `ssh -tt` interactive channel and supports **key auth only**; password-auth profiles fall back to a local shell and now print a one-line notice (so a local shell is not mistaken for a remote one) — use the Files tab and the model tools for password auth |
 | Terminal opens in the remote `$HOME` instead of the workspace directory | Fixed in 2.4.5 (the wrapper `cd`s into the workspace `remotePath`, falling back to `$HOME` when it no longer exists); if it still starts in `$HOME`, make sure 2.4.5 is installed and DSH restarted |
 | Files tab tree root shows the mirror directory id (e.g. `wmu3sxe24jpvg`) | Fixed in 2.4.6: the root row now shows the **remote directory name** (e.g. `IB_Robot`) with the full remote path on hover; that label never passes through the `fs.*` routes, so the client renders the replacement |
+| `@` completion only finds the few files in the mirror | Fixed in 2.4.7: in a remote-workspace session `@` now lists remote files (60s index cache + 900ms query budget); if only mirror files show up, make sure 2.4.7 is installed and DSH restarted |
 | Install fails with `minimumReleaseAge` or "No matching version" right after a release | npm supply-chain freshness policy — retry after 1–5 minutes |
 | A command hangs forever | The 120s timeout discards the pooled session automatically; use `timeoutMs: 0` for long jobs and `remote_ssh_kill` at any time |
 | Large files are truncated | 4MB per read, ≈6.29MB on the pooled download path (larger files fall back to a one-shot connection); use `remote_ssh_exec` with `head`/`tail` to page through |

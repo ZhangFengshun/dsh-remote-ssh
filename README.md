@@ -15,6 +15,7 @@
 | 💻 远程终端 | 内置「终端」页签自动检测远程工作区，SSH 交互式终端，**落在工作区对应的远程目录**（与 VSCode Remote-SSH 一致） |
 | 🌐 远程工作区 | 选择远程目录创建原生工作区，一键进入远程环境 |
 | 🤖 模型工具 | 13 个 `remote_ssh_*` 工具，会话感知免填连接参数；命令级超时 + `remote_ssh_kill` 兜底恢复 |
+| 🗂️ `@` 引用补全 | 远程工作区会话里 `@` 补全列**远端**文件（git 仓库走 `git ls-files`，实测 0.1s；非 git 用有界 `find`；索引缓存 + 900ms 查询预算，超时降级不卡输入框） |
 | ⚡ 打开提速 | 单往返合并读 + raw 文本快路径 + 结果缓存（LRU + 5s TTL）：首开 ≈**1.31×**，TTL 内重复打开 **0 往返**，过期复验 **≈5×**（真实超算实测）；`remote_ssh_exec` 连接复用 **≈15×** |
 
 ## 截图
@@ -45,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.6
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.7
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -155,6 +156,15 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 
 远程工作区会话中调用工具可免填 `profileId` 等连接参数；全部文件/命令类工具走持久 SSH 会话池 + 结果缓存，`remote_ssh_exec` 单命令实测 ≈15× 提速。
 
+## `@` 文件引用补全
+
+远程工作区会话里输入 `@`，候选来自**远端**（与「文件」页签的树一致），而不是本地镜像目录：
+
+- **索引来源**：git 仓库用 `git ls-files --cached --others --exclude-standard`（尊重 `.gitignore`、含未跟踪文件；真实超算实测 0.117s / 137 条），非 git 目录回退有界 `find`（`maxdepth 5` + 剪枝，实测 1.57s / 3121 条）；
+- **查询语义与官方 provider 逐条对齐**：`@` 与 `@src/` 走远端目录列举；`@read` 走索引模糊匹配（同名 > 前缀 > 名称子串 > 路径子串 > 子序列，目录加权 +25）；
+- **不卡输入框**：索引按工作区缓存 60 秒（写文件/执行命令后自动失效），单次补全只等 900ms——超时先用旧索引作答、重建在后台进行；连接异常时自动回退到本地行为；
+- **本地工作区不受影响**：非远程会话直接委托宿主原实现，索引与排序完全没有改动。
+
 ## 命令超时与恢复
 
 所有 SSH 命令默认 **120 秒**超时（issue #5）：一条挂起的远端命令（网络卡顿、远端进程僵死、等待 stdin 的 `cat`）不会再永久占用会话、拖死后续命令。
@@ -188,6 +198,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 内置「终端」页签连不上 | 终端为 `ssh -tt` 交互式通道，**仅支持密钥认证**；密码认证的连接会回退为本地 shell 并打印一行提示（避免把本地 shell 误认为已连上远程），密码认证请改用「文件」页签与模型工具 |
 | 终端落在远程 `$HOME` 而不是工作区目录 | 2.4.5 起已修复（wrapper 会 `cd` 到工作区 `remotePath`，目录不存在时回退 `$HOME`）；若仍停在 `$HOME`，确认 2.4.5 已装入并重启 DSH |
 | 「文件」页签树根显示镜像目录 ID（如 `wmu3sxe24jpvg`） | 2.4.6 起已修复：树根改为显示**远程目录名**（如 `IB_Robot`），悬停可见完整远程路径；该标签不经过 `fs.*` 路由，由客户端渲染层替换 |
+| `@` 补全只搜到镜像里那几个文件 | 2.4.7 起已修复：远程工作区会话的 `@` 补全改列远端文件（索引缓存 60s + 900ms 查询预算）；若仍只有镜像文件，确认 2.4.7 已装入并重启 DSH |
 | 安装时提示 `minimumReleaseAge` 或「No matching version」（刚发布） | npm 供应链新鲜度策略，等 1–5 分钟后重试即可 |
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |
