@@ -46,7 +46,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.7
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.8
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -161,6 +161,7 @@ In a remote-workspace session, `profileId` and other connection params can be om
 In a remote-workspace session, typing `@` offers **remote** candidates (matching the Files tab tree) instead of the local mirror directory:
 
 - **Index source**: git repos use `git ls-files --cached --others --exclude-standard` (respects `.gitignore`, includes untracked files; measured 0.117s / 137 entries on a real HPC), non-git directories fall back to a bounded `find` (`maxdepth 5` + pruning, measured 1.57s / 3121 entries);
+- **Exclusion happens remotely, before truncation** (fixed in 2.4.8): `git ls-files --cached --others` output is **not globally sorted** (untracked files come first in readdir order), so a `node_modules/` tree can fill the first 20,000 lines and exhaust the quota — the excluded directories are therefore filtered by a remote `grep -vE` *before* `head` (same source of truth as the `-prune` list), with the client-side filter kept as a second line of defence; hitting the index cap now logs a warning that files may be missing;
 - **Query semantics mirror the official provider**: `@` and `@src/` list a remote directory; `@read` runs the fuzzy index (exact name > prefix > name substring > path substring > subsequence, directories +25);
 - **The caret never stalls**: the index is cached per workspace for 60s (invalidated after writes/commands) and a single completion waits at most 900ms — on timeout the stale index answers and the rebuild continues in the background; connection failures fall back to local behaviour;
 - **Local workspaces are untouched**: non-remote sessions delegate straight to the host implementation.
@@ -199,6 +200,7 @@ The plugin never patches DSH sources or injects into the profile dependency tree
 | Terminal opens in the remote `$HOME` instead of the workspace directory | Fixed in 2.4.5 (the wrapper `cd`s into the workspace `remotePath`, falling back to `$HOME` when it no longer exists); if it still starts in `$HOME`, make sure 2.4.5 is installed and DSH restarted |
 | Files tab tree root shows the mirror directory id (e.g. `wmu3sxe24jpvg`) | Fixed in 2.4.6: the root row now shows the **remote directory name** (e.g. `IB_Robot`) with the full remote path on hover; that label never passes through the `fs.*` routes, so the client renders the replacement |
 | `@` completion only finds the few files in the mirror | Fixed in 2.4.7: in a remote-workspace session `@` now lists remote files (60s index cache + 900ms query budget); if only mirror files show up, make sure 2.4.7 is installed and DSH restarted |
+| In a large repo `@` cannot find real files (e.g. root `AGENTS.md`, `src/**`) | Fixed in 2.4.8: exclusion used to run *after* truncation, so a `node_modules/` tree could exhaust the index quota; exclusion now happens remotely (`grep`/`-prune`) before truncation, and hitting the cap logs a warning |
 | Install fails with `minimumReleaseAge` or "No matching version" right after a release | npm supply-chain freshness policy — retry after 1–5 minutes |
 | A command hangs forever | The 120s timeout discards the pooled session automatically; use `timeoutMs: 0` for long jobs and `remote_ssh_kill` at any time |
 | Large files are truncated | 4MB per read, ≈6.29MB on the pooled download path (larger files fall back to a one-shot connection); use `remote_ssh_exec` with `head`/`tail` to page through |

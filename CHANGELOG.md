@@ -2,6 +2,17 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.8] — 修复大仓里 `@` 补全不可用：索引排除必须发生在截断之前（issue #10 实测反馈）
+### 修复
+- **根因**：2.4.7 的索引命令在 git 分支里是 `git ls-files … | head -n 20001 | sed …`——**先截断、后排除**（排除原本只在客户端 `refParseIndexOutput` 里做）。而 `git ls-files --cached --others` 的输出**不是全局字典序**：未跟踪文件按 readdir 顺序先输出，`node_modules/` 这类目录可能占满前两万行。实测报告者的仓库 node_modules 有 **18,880 条（84.5%）**，把 `head` 配额吃掉 94%，`AGENTS.md` 落在第 **20417** 行被整段切掉，`src/**`（1,742 个文件）同样全部缺失——症状是 `@AGENTS` 搜不到、返回一堆 pip 内部目录（命中 300 分子序列分支）。
+- **修法**：把排除**下推到远端**、置于 `head` 之前——git 分支新增 `grep -vE '<排除正则>'`（正则由 `REF_EXCLUDED_DIRS` 单一事实来源生成，只匹配完整路径段，`distribution/` 这类前缀相同的普通目录不会被误伤）；find 分支本就用 `-prune` 在远端剪枝，无需改动。客户端的 `excludedSegment` 保留作双保险。
+- **效果**（报告者仓库）：过滤后 **3,470 条 < 20,000 上限**，`AGENTS.md` 回到第 1,537 行、`src/` 1,742 条全部保留、输出体积从 1.44 MB 降到 205 KB（**−85%**）——该仓库本就不该触发截断，纯属顺序问题造成的误伤。
+- **新增截断告警**（采纳其建议 1）：索引按上限 +1 行取样，若有效行数超限即打一条 warn（每个 workspace 只报一次），说明「文件过多、`@` 可能漏文件」并建议在远端 `.gitignore` 忽略构建产物/虚拟环境；避免用户只看到「搜不到」而不知被截断。
+
+### 测试
+- 新增 `tests/file-references-truncation.test.mjs`（**38 条断言**），其中 **B 段是真实端到端**：临时 git 仓库（已跟踪 `AGENTS.md` + `src/**`，未跟踪 400 个 `node_modules` 包）→ 用**真实代码生成**的命令跑**真实 POSIX 管道**，断言「旧行为（先截断）AGENTS.md 被切掉、前 200 行全是 node_modules」而「新行为 AGENTS.md 存活、src 40 条全保留、node_modules 零残留、输出更小」；另含命令结构断言（grep 必须在 head 之前、正则单一事实来源、完整路径段匹配、不误伤 `distribution/`）、解析器双保险与告警接线。
+- 该测试还**锁定了一个此前未被记录的事实**：`git ls-files --cached --others` 非全局字典序（未跟踪文件在前）——夹具中 `AGENTS.md` 落在第 401/441 行。
+
 ## [2.4.7] — `@` 文件引用补全支持远程工作区（issue #10）
 ### 新增
 - **远程工作区会话里 `@` 补全现在列远端文件**（感谢 @Linhaojing 的通道分析与挂载点核实）：`@` 补全由宿主 `ctx.fileReferences` 服务提供（官方 provider `@deepseek-ai/dsh-file-reference-local`），它只遍历**本地磁盘**——远程工作区会话的 cwd 是本地镜像目录，于是候选只有镜像里那几个文件（通常只有本插件写入的 `README.md`）。该链路不经过任何 HTTP 路由（客户端经 remote gateway 调 `ctx.fileReferences.list`），因此采用**服务层包装**：

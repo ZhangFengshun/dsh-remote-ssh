@@ -37,6 +37,7 @@ const moduleCode = [
   grab('function refRankCandidates'),
   grab('function refVisibleForGlobalQuery'),
   grab('function refParseIndexOutput'),
+  grab('function refExcludeRegex'),
   grab('function refIndexCommand'),
   grab('function shellQuote'),
   grab('function shellQuotePath'),

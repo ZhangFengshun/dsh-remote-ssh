@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.7
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.8
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -161,6 +161,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 远程工作区会话里输入 `@`，候选来自**远端**（与「文件」页签的树一致），而不是本地镜像目录：
 
 - **索引来源**：git 仓库用 `git ls-files --cached --others --exclude-standard`（尊重 `.gitignore`、含未跟踪文件；真实超算实测 0.117s / 137 条），非 git 目录回退有界 `find`（`maxdepth 5` + 剪枝，实测 1.57s / 3121 条）；
+- **排除在远端、截断之前**（2.4.8 修复）：`git ls-files --cached --others` 的输出**不是全局字典序**（未跟踪文件按 readdir 顺序先输出），`node_modules/` 这类目录可能占满前两万行把配额吃光——因此排除目录由远端 `grep -vE` 在 `head` 之前完成（与 `-prune` 同源，正则由同一份排除表生成），客户端过滤仅作双保险；索引达到上限时会打一条 warn 提示可能漏文件；
 - **查询语义与官方 provider 逐条对齐**：`@` 与 `@src/` 走远端目录列举；`@read` 走索引模糊匹配（同名 > 前缀 > 名称子串 > 路径子串 > 子序列，目录加权 +25）；
 - **不卡输入框**：索引按工作区缓存 60 秒（写文件/执行命令后自动失效），单次补全只等 900ms——超时先用旧索引作答、重建在后台进行；连接异常时自动回退到本地行为；
 - **本地工作区不受影响**：非远程会话直接委托宿主原实现，索引与排序完全没有改动。
@@ -199,6 +200,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 终端落在远程 `$HOME` 而不是工作区目录 | 2.4.5 起已修复（wrapper 会 `cd` 到工作区 `remotePath`，目录不存在时回退 `$HOME`）；若仍停在 `$HOME`，确认 2.4.5 已装入并重启 DSH |
 | 「文件」页签树根显示镜像目录 ID（如 `wmu3sxe24jpvg`） | 2.4.6 起已修复：树根改为显示**远程目录名**（如 `IB_Robot`），悬停可见完整远程路径；该标签不经过 `fs.*` 路由，由客户端渲染层替换 |
 | `@` 补全只搜到镜像里那几个文件 | 2.4.7 起已修复：远程工作区会话的 `@` 补全改列远端文件（索引缓存 60s + 900ms 查询预算）；若仍只有镜像文件，确认 2.4.7 已装入并重启 DSH |
+| 大仓里 `@` 搜不到真实文件（如根目录 `AGENTS.md`、`src/**`） | 2.4.8 起已修复：此前排除目录发生在截断之后，`node_modules/` 这类目录会吃光索引配额；现在排除由远端 `grep`/`-prune` 在截断前完成，并会在索引达上限时打 warn 提示 |
 | 安装时提示 `minimumReleaseAge` 或「No matching version」（刚发布） | npm 供应链新鲜度策略，等 1–5 分钟后重试即可 |
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |
