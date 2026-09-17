@@ -45,7 +45,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.5
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.6
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -187,6 +187,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 侧边栏文件页签显示「这类内容还没有可用的查看方式。」 | `dsh-better-sidebar` 主机半边未加载：0.18.1 / 0.19.0 / 0.19.1 在 DSH Desktop 上会因 `SessionLogOffset` 运行时导入失败——降到 0.18.0 或使用修复版（上游 PR [#641](https://github.com/omdsh-dev/DSH-better-sidebar/pull/641)） |
 | 内置「终端」页签连不上 | 终端为 `ssh -tt` 交互式通道，**仅支持密钥认证**；密码认证的连接会回退为本地 shell 并打印一行提示（避免把本地 shell 误认为已连上远程），密码认证请改用「文件」页签与模型工具 |
 | 终端落在远程 `$HOME` 而不是工作区目录 | 2.4.5 起已修复（wrapper 会 `cd` 到工作区 `remotePath`，目录不存在时回退 `$HOME`）；若仍停在 `$HOME`，确认 2.4.5 已装入并重启 DSH |
+| 「文件」页签树根显示镜像目录 ID（如 `wmu3sxe24jpvg`） | 2.4.6 起已修复：树根改为显示**远程目录名**（如 `IB_Robot`），悬停可见完整远程路径；该标签不经过 `fs.*` 路由，由客户端渲染层替换 |
 | 安装时提示 `minimumReleaseAge` 或「No matching version」（刚发布） | npm 供应链新鲜度策略，等 1–5 分钟后重试即可 |
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |

@@ -2,6 +2,15 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.6] — 「文件」页签树根显示远程目录名（issue #9）
+### 修复
+- **树根标签不再显示本地镜像目录 ID**（感谢 @Linhaojing 的链路定位）：better-sidebar「文件」页签的树根标签取自会话 cwd（= 本地镜像路径）的 basename，于是显示成 `wmu3sxe24jpvg` 之类的镜像目录名。这条链路**不经过任何 `fs.*` 路由**，且 Host 侧 `session.cwd` 虽已返回 `root` 字段但客户端只消费 `cwd`（`api.sessionCwd(...).then(r => setFetchedCwd(r.cwd))`，另有 `useSessionCwd` 直接读客户端会话列表的 `cwd`），因此只能在渲染层替换文本。现由客户端取 `listWorkspaces` 的 `mirrorPath`/`remotePath` 建立「镜像 basename → 远程 basename」映射，把树根那一行换成**远程目录名**（如 `IB_Robot`），并给该行加 `title` 显示完整远程路径（如 `~/lhj/IB_Robot`）。
+  - **定位不依赖构建期哈希类名**：根行是树里唯一带内联 `padding-left:6px` 的行，仅当该行内纯文本节点恰好等于某远程工作区的镜像 basename 时才替换——同名子条目、本地工作区、无根行标志（上游改版）时一律保守不动；
+  - **同步替换 + 幂等自愈**：与设置导航图标同样在 MutationObserver 回调（微任务、绘制前）内完成，不会先闪一下镜像 ID；React 重渲染还原文本时由 1s 复检与 30s 工作区轮询恢复。
+
+### 测试
+- 新增 `tests/tree-root-label.test.mjs`：从 `lib/client.js` 提取**真实**实现配极简 DOM 桩执行，覆盖 7 组场景共 17 条断言（替换、假阳性防护、幂等、React 还原自愈、本地工作区、同名边界、样式容错、接线检查）。
+
 ## [2.4.5] — 集成终端落在工作区远程目录（issue #7）+ 密码认证回退提示
 ### 修复
 - **「终端」页签现在落在工作区对应的远程目录**（感谢 @Linhaojing 的完整定位与验证矩阵）：此前生成的 `dsh-remote-shell.js` 只拼 host/user/port/keyPath/proxyJump，`ssh -tt` 不带远程命令，交互式 shell 落在远程 `$HOME`；同一会话里出现「文件树在工作区目录、终端在 $HOME」的割裂。现在 wrapper 读取标记文件里**已有的** `remotePath` 并追加远程命令：

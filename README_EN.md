@@ -45,7 +45,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.5
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.6
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -187,6 +187,7 @@ The plugin never patches DSH sources or injects into the profile dependency tree
 | Sidebar Files tab says "Nothing here can view this kind of content yet." | `dsh-better-sidebar` host half failed to load: 0.18.1 / 0.19.0 / 0.19.1 hit the `SessionLogOffset` runtime import on DSH Desktop — downgrade to 0.18.0 or use a fixed build (upstream PR [#641](https://github.com/omdsh-dev/DSH-better-sidebar/pull/641)) |
 | Built-in Terminal tab cannot connect | The terminal is an `ssh -tt` interactive channel and supports **key auth only**; password-auth profiles fall back to a local shell and now print a one-line notice (so a local shell is not mistaken for a remote one) — use the Files tab and the model tools for password auth |
 | Terminal opens in the remote `$HOME` instead of the workspace directory | Fixed in 2.4.5 (the wrapper `cd`s into the workspace `remotePath`, falling back to `$HOME` when it no longer exists); if it still starts in `$HOME`, make sure 2.4.5 is installed and DSH restarted |
+| Files tab tree root shows the mirror directory id (e.g. `wmu3sxe24jpvg`) | Fixed in 2.4.6: the root row now shows the **remote directory name** (e.g. `IB_Robot`) with the full remote path on hover; that label never passes through the `fs.*` routes, so the client renders the replacement |
 | Install fails with `minimumReleaseAge` or "No matching version" right after a release | npm supply-chain freshness policy — retry after 1–5 minutes |
 | A command hangs forever | The 120s timeout discards the pooled session automatically; use `timeoutMs: 0` for long jobs and `remote_ssh_kill` at any time |
 | Large files are truncated | 4MB per read, ≈6.29MB on the pooled download path (larger files fall back to a one-shot connection); use `remote_ssh_exec` with `head`/`tail` to page through |
