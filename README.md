@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.8
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.9
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -64,7 +64,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 **三步上手**
 
 1. **设置 → 远程连接** → 添加连接（主机 / 端口 / 用户 / 密钥）→ 点「测试连接」验证；已有 `~/.ssh/config` 可直接一键导入
-2. **添加工作区** → 选「选择远程目录…」→ 选连接 → 浏览并选择远程目录（该目录会成为原生 DSH 工作区）
+2. **添加工作区** → 选「选择远程目录…」→ 选连接 → 浏览并选择远程目录（该目录会成为原生 DSH 工作区）；目录还不存在时点「📁 新建目录」就地创建（本地 / 远程 tab 均支持），创建后自动进入新目录
 3. 进入该工作区会话：内置「文件」页签直接显示远程文件（编辑保存直写远程），「终端」页签自动 SSH 到该工作区的**远程目录**（仅密钥认证）
 
 **会话内直接对模型说**（远程工作区会话中免填连接参数）：
@@ -201,6 +201,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 「文件」页签树根显示镜像目录 ID（如 `wmu3sxe24jpvg`） | 2.4.6 起已修复：树根改为显示**远程目录名**（如 `IB_Robot`），悬停可见完整远程路径；该标签不经过 `fs.*` 路由，由客户端渲染层替换 |
 | `@` 补全只搜到镜像里那几个文件 | 2.4.7 起已修复：远程工作区会话的 `@` 补全改列远端文件（索引缓存 60s + 900ms 查询预算）；若仍只有镜像文件，确认 2.4.7 已装入并重启 DSH |
 | 大仓里 `@` 搜不到真实文件（如根目录 `AGENTS.md`、`src/**`） | 2.4.8 起已修复：此前排除目录发生在截断之后，`node_modules/` 这类目录会吃光索引配额；现在排除由远端 `grep`/`-prune` 在截断前完成，并会在索引达上限时打 warn 提示 |
+| 想加的远程目录还不存在，「添加工作区」里没法创建 | 2.4.9 起「目录选择器」底部有「📁 新建目录」（本地 / 远程 tab 均有）：输入名字即可就地创建并自动进入 |
 | 安装时提示 `minimumReleaseAge` 或「No matching version」（刚发布） | npm 供应链新鲜度策略，等 1–5 分钟后重试即可 |
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |

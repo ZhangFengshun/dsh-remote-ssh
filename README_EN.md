@@ -46,7 +46,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.8
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.9
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -64,7 +64,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 **Three steps**
 
 1. **Settings → Remote SSH** → Add a connection (host / port / user / key) → Click "Test Connection"; an existing `~/.ssh/config` can be imported in one click
-2. **Add Workspace** → Choose "Select Remote Directory…" → Pick a connection → Browse and select a remote directory (it becomes a native DSH workspace)
+2. **Add Workspace** → Choose "Select Remote Directory…" → Pick a connection → Browse and select a remote directory (it becomes a native DSH workspace); if the directory does not exist yet, click "📁 New folder" to create it in place (both the local and remote tabs) — the picker then enters it automatically
 3. Inside that workspace session: the built-in **Files** tab shows remote files (edits save straight back to remote), and the **Terminal** tab auto-SSHes **into the workspace's remote directory** (key auth only)
 
 **Just ask the model** (connection params are auto-filled inside a remote-workspace session):
@@ -201,6 +201,7 @@ The plugin never patches DSH sources or injects into the profile dependency tree
 | Files tab tree root shows the mirror directory id (e.g. `wmu3sxe24jpvg`) | Fixed in 2.4.6: the root row now shows the **remote directory name** (e.g. `IB_Robot`) with the full remote path on hover; that label never passes through the `fs.*` routes, so the client renders the replacement |
 | `@` completion only finds the few files in the mirror | Fixed in 2.4.7: in a remote-workspace session `@` now lists remote files (60s index cache + 900ms query budget); if only mirror files show up, make sure 2.4.7 is installed and DSH restarted |
 | In a large repo `@` cannot find real files (e.g. root `AGENTS.md`, `src/**`) | Fixed in 2.4.8: exclusion used to run *after* truncation, so a `node_modules/` tree could exhaust the index quota; exclusion now happens remotely (`grep`/`-prune`) before truncation, and hitting the cap logs a warning |
+| The remote directory you want does not exist yet and "Add Workspace" cannot create it | Fixed in 2.4.9: the directory picker has a "📁 New folder" button (both tabs) — type a name to create it in place and enter it automatically |
 | Install fails with `minimumReleaseAge` or "No matching version" right after a release | npm supply-chain freshness policy — retry after 1–5 minutes |
 | A command hangs forever | The 120s timeout discards the pooled session automatically; use `timeoutMs: 0` for long jobs and `remote_ssh_kill` at any time |
 | Large files are truncated | 4MB per read, ≈6.29MB on the pooled download path (larger files fall back to a one-shot connection); use `remote_ssh_exec` with `head`/`tail` to page through |
