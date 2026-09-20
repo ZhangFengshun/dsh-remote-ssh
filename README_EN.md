@@ -46,7 +46,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.10
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.11
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -183,7 +183,7 @@ All SSH commands default to a **120-second** timeout (issue #5): a hung remote c
 | --- | --- | --- |
 | DSH | 0.1.5-rc.1 (DSH Desktop v2.0.9) | ✅ host services / settings / tools / slots / upload & download interception all compatible |
 | DSH | 0.1.2-rc.1 stable line | ✅ (the 2.3.x-era baseline) |
-| dsh-better-sidebar | 0.15.0 – 0.18.0 | ✅ `fs.tree/read/write/search` (4-endpoint contract) |
+| dsh-better-sidebar | 0.15.0 – 0.18.0 | ✅ `fs.tree`/`fs.read`/`fs.write` + `fs.search` (the `{ matches: cwd-relative '/'-separated paths, truncated }` contract, since 2.4.11; returning only `entries` used to crash the whole Files tab on search) |
 | dsh-better-sidebar | 0.19.x | ⚠️ this plugin already supports the 6-endpoint contract (incl. `fs.rename`/`fs.remove`); 0.19.0/0.19.1 themselves cannot load their host half on DSH Desktop until upstream fixes it (see the warning under [Installation](#installation)) |
 | Remote sshd | standard OpenSSH (Linux / HPC / Windows) | ✅ key auth; password auth needs `sshpass` on the host (POSIX) |
 
@@ -203,6 +203,9 @@ The plugin never patches DSH sources or injects into the profile dependency tree
 | In a large repo `@` cannot find real files (e.g. root `AGENTS.md`, `src/**`) | Fixed in 2.4.8: exclusion used to run *after* truncation, so a `node_modules/` tree could exhaust the index quota; exclusion now happens remotely (`grep`/`-prune`) before truncation, and hitting the cap logs a warning |
 | The remote directory you want does not exist yet and "Add Workspace" cannot create it | Fixed in 2.4.9: the directory picker has a "📁 New folder" button (both tabs) — type a name to create it in place and enter it automatically |
 | Accessing from the LAN / another device makes every file capability return 403 | Fixed in 2.4.10: the trust fence now reads the host's `ctx.webRuntime.trustedHosts` (same source as the `/api` gateway). Add the address to the DSH trust list — start with `--trusted-host <host[:port]>`, or access through your paired remote-access setup; with nothing configured the behaviour is unchanged (loopback only) |
+| The Files tab's "search by file name" crashes with `Cannot read properties of undefined (reading 'length')` | Fixed in 2.4.11: the `fs.search` interception returned only `entries`, while better-sidebar's client contract is `{ matches, truncated }`; it now provides `matches` (cwd-relative, `/`-separated, matching upstream's own implementation) and keeps `entries` |
+| "Search by file name" spins forever in a remote workspace (large trees) | Fixed in 2.4.11: shallow-first (`-maxdepth 3`, measured 0.68s cold / 0.11s warm) **returning as soon as anything matches** (the deeper pass becomes a background cache warm-up and only runs synchronously when the shallow pass finds nothing), noise directories pruned before traversal, the short-circuit-blocking `sort` removed, and a remote wall-clock budget that returns the **partial results collected so far** and flags them as incomplete. Measured on an OpenFOAM workspace: 5 minutes with zero output before → **43 matches in 0.96s** now |
+| In a remote session `@filename` shows no candidates, while a bare `@` works | Fixed in 2.4.11: fuzzy queries rely on the index, and the index preferred `git ls-files --cached --others` (`--others` must walk the whole working tree and never finishes on huge projects → empty index). It now degrades in three budgeted steps (full git 6s → index-only git 3s → bounded `find` `maxdepth 3` + 5s) and falls back to a bounded `find` (measured 0.65s) whenever the index is not ready yet, so candidates are never empty |
 | Install fails with `minimumReleaseAge` or "No matching version" right after a release | npm supply-chain freshness policy — retry after 1–5 minutes |
 | A command hangs forever | The 120s timeout discards the pooled session automatically; use `timeoutMs: 0` for long jobs and `remote_ssh_kill` at any time |
 | Large files are truncated | 4MB per read, ≈6.29MB on the pooled download path (larger files fall back to a one-shot connection); use `remote_ssh_exec` with `head`/`tail` to page through |

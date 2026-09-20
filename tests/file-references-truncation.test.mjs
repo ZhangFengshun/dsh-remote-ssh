@@ -48,7 +48,11 @@ const pick = (re) => { const m = src.match(re); if (!m) throw new Error('missing
 const api = new Function([
   pick(/const REF_MAX_RESULTS = \d+;/),
   pick(/const REF_MAX_ENTRIES = \d+;/),
-  pick(/const REF_FIND_MAXDEPTH = \d+;/),
+  pick(/const REF_INDEX_FIND_MAXDEPTH = \d+;/),
+  pick(/const REF_INDEX_GIT_FULL_BUDGET_SEC = \d+;/),
+  pick(/const REF_INDEX_GIT_CACHED_BUDGET_SEC = \d+;/),
+  pick(/const REF_INDEX_FIND_BUDGET_SEC = \d+;/),
+  pick(/const REF_INDEX_BUILD_TIMEOUT_MS = \d+;/),
   pick(/const REF_EXCLUDED_DIRS = new Set\(\[[\s\S]*?\]\);/),
   grab('function refExcludeRegex'),
   grab('function refIndexCommand'),
@@ -66,9 +70,9 @@ console.log('A · 命令结构（排除必须在 head 之前）')
   const gitLine = cmd.split('\n').find((l) => l.includes('git ls-files'))
   const iGrep = gitLine.indexOf('grep -vE')
   const iHead = gitLine.indexOf('head -n')
-  const iSed = gitLine.indexOf("sed 's/^/f\t/'")
+  // sed 已移到输出行（printf '%s\n' "$G" | sed 's/^/f\t/'），故只在 git 行内校验「排除在截断之前」
   check(iGrep > 0 && iHead > 0 && iGrep < iHead, 'git 分支：grep -vE 在 head 之前（先排除后截断）')
-  check(iHead < iSed, 'git 分支：head 在 sed 加帧之前')
+  check(cmd.split('\n').some((l) => l.includes("| sed 's/^/f\t/'")), 'git 结果由 printf|sed 加帧输出')
   const re = api.refExcludeRegex()
   check(re === "(^|/)(\\.git|node_modules|dist|build|out|coverage|target|\\.next|\\.nuxt|\\.turbo|\\.venv|__pycache__|\\.pytest_cache|\\.mypy_cache|\\.gradle)(/|$)", '排除正则由 REF_EXCLUDED_DIRS 生成（单一事实来源）')
   for (const d of api.REF_EXCLUDED_DIRS) check(re.includes(d.replace(/\./g, '\\.')), `正则包含 ${d}`)

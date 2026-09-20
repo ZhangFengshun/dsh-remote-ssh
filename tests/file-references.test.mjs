@@ -30,7 +30,10 @@ const moduleCode = [
   pick(/const REF_MAX_RESULTS = \d+;/),
   pick(/const REF_MAX_ENTRIES = \d+;/),
   pick(/const REF_EXCLUDED_DIRS = new Set\(\[[\s\S]*?\]\);/),
-  pick(/const REF_FIND_MAXDEPTH = \d+;/),
+  pick(/const REF_INDEX_FIND_MAXDEPTH = \d+;/),
+  pick(/const REF_INDEX_GIT_FULL_BUDGET_SEC = \d+;/),
+  pick(/const REF_INDEX_GIT_CACHED_BUDGET_SEC = \d+;/),
+  pick(/const REF_INDEX_FIND_BUDGET_SEC = \d+;/),
   grab('function refSplitQuery'),
   grab('function refSubsequenceScore'),
   grab('function refScoreCandidate'),
@@ -126,10 +129,13 @@ console.log('A5 · 索引命令生成')
 {
   const cmd = api.refIndexCommand('~/lhj/IB_Robot')
   check(cmd.includes("cd ~/'lhj/IB_Robot'") || cmd.includes('cd ~/'), 'cd 使用 shellQuotePath（~ 保持未引号）')
-  check(/git ls-files --cached --others --exclude-standard/.test(cmd), 'git 仓库走 git ls-files（含未跟踪、尊重 .gitignore）')
-  check(/find \. -mindepth 1 -maxdepth 5/.test(cmd), '非 git 回退到有界 find（maxdepth 5）')
-  check(cmd.includes("head -n " + (api.REF_MAX_ENTRIES + 1)), '两条分支都有条数上限')
-  check(cmd.includes("-printf '%y\t%P\\n'"), 'find 输出 类型+相对路径 帧')
+  check(/git ls-files --cached --others --exclude-standard/.test(cmd), 'git 仓库优先走 git ls-files（含未跟踪、尊重 .gitignore）')
+  check(/command -v timeout/.test(cmd), 'git 那一步有墙钟预算（大仓库上 --others 会跑不完）')
+  check(/git ls-files --cached 2>\/dev\/null/.test(cmd), '完整 git 为空时回退到仅索引 git（恒定快）')
+  check(/find \. -mindepth 1 -maxdepth 3/.test(cmd), '索引回退到有界 find（maxdepth 3 —— 原 5 在巨型目录上跑不完）')
+  check(cmd.includes("head -n " + (api.REF_MAX_ENTRIES + 1)), '三条路径都有条数上限')
+  check(/T=.*command -v timeout/.test(cmd) && /"\$T" \d+ find/.test(cmd), 'find 回退也有墙钟预算（timeout/gtimeout 探测 + 回退分支）')
+  check(cmd.includes("-printf '%y\\t%P\\n'"), 'find 输出 类型+相对路径 帧（\\t/\\n 为字面转义，由远端 find 解释）')
   for (const d of api.REF_EXCLUDED_DIRS) check(cmd.includes("-name '" + d + "'"), `排除目录 ${d} 进入剪枝表达式`)
 }
 

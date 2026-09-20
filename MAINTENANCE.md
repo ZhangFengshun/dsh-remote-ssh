@@ -107,6 +107,26 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
 
 ## 5. 维护备忘
 
+- **🚨 改完 `lib/index.js` 必须跑模块加载冒烟（2026-09-20 血的教训）**：曾把
+  `const REMOTE_SEARCH_SKIP_DIRS = new Set([...REF_EXCLUDED_DIRS, …])` 写在
+  `REF_EXCLUDED_DIRS` 定义**之前** —— 模块级 `const` 的展开会在模块求值期立即读取该绑定，
+  于是抛 `ReferenceError: Cannot access 'REF_EXCLUDED_DIRS' before initialization`，
+  整个插件树加载失败（`dsh-plugin-desktop: plugin tree failed to load`），
+  **用户连桌面都进不去，只能卸载插件**。
+  当时的测试全都只从源码里「提取函数/常量文本」再单独求值，所以完全测不出来。
+  现在有 `tests/module-load.test.mjs` 兜底（两层：① 真实 `import()` 模块；
+  ② 带花括号深度的静态扫描，只查模块级引用顺序），并且可以指定目标文件做上机前冒烟：
+
+  ```powershell
+  node tests/module-load.test.mjs                                    # 检查仓库源码
+  $env:DSH_TEST_MODULE="$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@zhangfengshun\dsh-remote-ssh\lib\index.js"
+  node tests/module-load.test.mjs                                    # 检查「DSH 将要加载的那个文件」
+  ```
+
+  发布前请把上面两条都跑一遍（第二条是上机前最后一道闸）。
+- **本地装包要用新文件名**：pnpm 会按 tarball 路径缓存 —— 用同一个文件名重复
+  `dsh plugin --profile desktop add file:…tgz` 时可能**沿用旧内容**（现象：装完发现包内没有新代码）。
+  重新打包后换个文件名（如 `-tdzfix.tgz`）或先 remove 再 add。
 - **🚫 README 的「## ❤️ 七夕快乐」段落是固定内容，任何文档改版都不得删除、改写或移位**
   （`README.md` 中文版 + `README_EN.md` 的 `## ❤️ Happy Qixi` 对应段落，含
   「本项目是送给 **zhangyi** 的七夕礼物。」三行与落款日期 2026 年 8 月 18 日）。

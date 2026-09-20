@@ -2,6 +2,27 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.11] — `fs.search` 返回契约对齐 better-sidebar：补上 `matches`（issue #13）
+### 修复
+- **「文件」页签的「按文件名搜索」不再崩掉整块页签**（感谢 @Linhaojing 的契约考古与最小复现）：better-sidebar 客户端契约是 `{ matches: string[], truncated }`（其注释原文：*matches are cwd-relative '/'-separated paths*，自 v0.13.0 引入搜索框起未变），并在渲染阶段直接读 `results.matches.length` / `results.matches.map(rel => …)`；而本插件的 `fs.search` 拦截只返回 `{ entries: [{path,isDir}], truncated }`，于是 `undefined.length` 抛 TypeError 被 `RenderBoundary` 兜住 → 整个页签变成错误条、搜索框与文件树一起消失。因为拦截是**无条件**的（不区分远程/本地会话），**本地工作区同样复现**，与 better-sidebar 版本无关。
+  - 两条分支统一经 `fsSearchResult()` 产出：`matches` **必定存在**且为 **cwd 相对、`/` 分隔**的字符串数组（与 better-sidebar 自带 `searchFiles` 的行为一致，结果行显示相对路径），`entries`（绝对路径 + `isDir`）保留作向前兼容；
+  - 本地分支：`matches` 由 `toPosixRelative(sessionCwd, entry.path)` 从绝对路径裁剪而来（Windows 盘符路径大小写不敏感、POSIX 保持大小写敏感、前缀相近的非子路径不误裁、非 ASCII 安全）；
+  - **附带修复远程分支的路径 bug**：`remoteGlob` 的 `files` 是 `find` 以命令行起点拼出的**远端绝对路径**，此前却用 `join(mirrorBase, f)` 拼成了畸形镜像路径（如 `<镜像根>/home/user/proj/src/a.jl`），远程搜索结果的路径本来就是错的；现在 `remoteGlob` 新增 `opts.relative`（`-printf '%P\n'`）取相对路径，`entries` 再据此拼镜像绝对路径（`remote_ssh_glob` 工具仍走默认的 `%p`，行为不变）。
+- README 兼容性表中原先笼统的 `fs.tree/read/write/search（4 端点契约）` 一行，已改为显式写明 `fs.search` 的 `{ matches, truncated }` 契约。
+- **远程工作区的搜索不再一直「加载中…」**（同 issue 的实测跟进：崩溃修好后，在真实 OpenFOAM 工作区里搜索变成永久 loading）。旧命令有两个致命点：① `… | sort | head -n 500` 里的 `sort` 会缓冲**全部** `find` 输出后才吐第一行，`head` 的提前短路完全失效；② 没有深度/时间约束，而 `find` 是深度优先——巨型子目录（`processor*` / 数据目录）会吃光预算，连顶层文件都轮不到。实测该工作区：**旧命令 5 分钟零输出**（还占住池化 SSH 会话，把文件树/读写一起拖住）。现在：
+  - **浅层优先 + 有结果即返回**：第一趟 `-maxdepth 3`（3s 预算，实测冷 0.68s / 热 0.11s）——**只要有命中就立刻返回**，深挖转**后台预热缓存**（同一 query 的后续请求会拿到更全的结果）；只有浅层**一无所获**时才同步等深挖趟（`-maxdepth 8`，5s 预算，实测会吃满）。此前条件是「浅层命中 < 200 就同步深挖」，而文件名片段极少命中 200 个 → 几乎每次查询都要多等一趟 ≤5s 的深挖（用户实测反馈「有点慢」），现已消除；两趟结果合并去重后本地排序（不再需要远端 `sort`）。实测同一工作区：**浅层 0.96s 返回 43 条命中**（旧命令 5 分钟 0 条）；
+  - **遍历前剪噪声目录**：`REMOTE_SEARCH_SKIP_DIRS` = 本插件索引排除表 ∪ 上游 `SEARCH_SKIP_DIRS`（`.git` / `node_modules` / `dist` / `.next` / `.pnpm-store` / `.turbo` / …）；
+  - **远端墙钟预算**：`timeout`（macOS 回退 `gtimeout`，都没有则退回无预算版本由 SSH 层兜底）到点杀掉 `find`，并把**已收集到的部分结果**照常返回 + `truncated: true`——宁可给部分结果，也不让 UI 无限转圈；
+  - **命中上限 200**（与上游 `DEFAULT_MAX_MATCHES` 一致）、**SSH 层 15s 超时**（不再占用池化会话 120s）、**同 query 30s 短缓存 + 并发合并**（连打键盘不会堆起一串 `find`），缓存挂 `cacheEpoch`（写/exec 后自动失效）。
+- **`@文件名` 在某些远程项目里完全没有候选**（用户实测反馈：同一台机器上 DFS-Dev 正常、另一个项目全空；而单独输入 `@` 正常——因为 `@` 走目录列举、模糊查询走索引）。根因：索引在 git 仓库里首选 `git ls-files --cached --others --exclude-standard`，而 `--others` 需要**遍历整棵工作树**枚举未跟踪文件，在巨型项目上根本跑不完（实测该目录 **10s 被超时杀掉、零输出**；`git ls-files --cached` 反而只要 0.085s 且为 0 条——仓库里没有任何已跟踪文件）→ 20s 构建预算内拿不到条目 → 索引为空。现在三级降级，每级都有墙钟预算：
+  - ① 完整 git（6s）→ ② 仅索引 git（3s，恒定快）→ ③ 有界 `find`（`maxdepth 3` + 5s；原为 `maxdepth 5` 且无预算，实测该目录 5 层遍历 >180s 都跑不完）；
+  - 实测同一项目：新命令 **921 条 / 6.68s**（其中 916 条含 `kOmega`、`node_modules` 零残留），三级合计 ≤14s < 20s 构建预算；
+  - **另外加了即时兜底**：模糊查询在索引尚未就绪（大仓库要 6.7s 才建好，而单次查询只等 900ms）时，**不再直接返回空列表**，而是用与侧栏搜索同一套有界 find（剪噪声 + 无 `sort` + `maxdepth 3` + 5s 预算，实测 **0.65s**）立刻给出候选；索引建好后自动切换到更全的索引结果。
+
+### 测试
+- 新增 `tests/fs-search-contract.test.mjs`（**34 条断言**）：`toPosixRelative`（POSIX / 尾部斜杠 / Windows 反斜杠 / 盘符大小写不敏感 / POSIX 大小写敏感 / 非子路径不误裁 / 空 base / null / 非 ASCII）、`fsSearchResult` 形状（`matches` 恒为字符串数组——**原崩溃点**、缺参数时仍为空数组而非 undefined、过滤空串与非字符串、`truncated` 归一化）、**契约模拟**（客户端 `.length` / `.map(rel)` 渲染相对路径 / 点击解析回 `entries.path`）、接线断言（两条分支、`remoteGlob` 的 `relative` 选项与 `%p` 默认值、不再有只回 `entries` 的旧分支）与 README 契约描述。
+- 新增 `tests/remote-search.test.mjs`（**36 条断言**）：两趟命令生成（`-maxdepth 3/8`、3s/5s 预算、无 `sort`、`%P`、`head 200`、`-prune`、`timeout`/`gtimeout` 探测与回退）、**延迟策略**（浅层有结果立即返回、后台预热写回缓存、浅层零命中才同步深挖、浅层满额不再深挖、预算到点返回部分结果 + `truncated`）、硬失败不深挖且不缓存、缓存命中与 `cacheEpoch` 失效、三个并发同 query 只跑一趟遍历、以及 `fs.search` 分支的接线。
+
 ## [2.4.10] — 非 loopback 访问不再全线 403：信任判定改用宿主 webRuntime.trustedHosts（issue #12）
 ### 修复
 - **信任判定与 `/api` 网关、better-sidebar 同源**（感谢 @Linhaojing 的验证矩阵与自我更正后的方案）：此前 `isTrusted()` 硬编码 loopback 白名单（`localhost` / `127.0.0.1` / `::1` / `0.0.0.0`），从局域网（例如经配对设备或反向代理访问）打开 GUI 时，本插件的 **5 类路由全部 403** —— `/remote-ssh/api/*` 全部 RPC、6 个被拦截的 `fs.*`、`git.*`、文件上传、`/sidebar/file`，也就是文件树 / 读写 / 搜索 / 重命名 / 删除 / git / 上传全线失效，插件几乎等于没装。而同一 Host 下 DSH 官方路由正常，说明是本插件单方面比宿主更严。

@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.10
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.11
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -183,7 +183,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | --- | --- | --- |
 | DSH | 0.1.5-rc.1（DSH Desktop v2.0.9） | ✅ 主机服务 / settings / tools / slot / 上传下载拦截全部咬合 |
 | DSH | 0.1.2-rc.1 稳定线 | ✅（插件 2.3.x 时代基线） |
-| dsh-better-sidebar | 0.15.0 – 0.18.0 | ✅ `fs.tree/read/write/search`（4 端点契约） |
+| dsh-better-sidebar | 0.15.0 – 0.18.0 | ✅ `fs.tree`/`fs.read`/`fs.write` + `fs.search`（`{ matches: cwd 相对 '/'-分隔路径, truncated }` 契约，2.4.11 起；此前只回 `entries` 会让「按文件名搜索」崩掉整块页签） |
 | dsh-better-sidebar | 0.19.x | ⚠️ 插件侧已适配 6 端点（含 `fs.rename`/`fs.remove`）；但 0.19.0/0.19.1 自身在 DSH Desktop 上主机半边无法加载，需等上游修复（见[安装](#安装)的警告） |
 | 远程主机 sshd | 标准 OpenSSH（Linux / 超算 / Windows） | ✅ 密钥认证；密码认证需本机 `sshpass`（POSIX） |
 
@@ -203,6 +203,9 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 大仓里 `@` 搜不到真实文件（如根目录 `AGENTS.md`、`src/**`） | 2.4.8 起已修复：此前排除目录发生在截断之后，`node_modules/` 这类目录会吃光索引配额；现在排除由远端 `grep`/`-prune` 在截断前完成，并会在索引达上限时打 warn 提示 |
 | 想加的远程目录还不存在，「添加工作区」里没法创建 | 2.4.9 起「目录选择器」底部有「📁 新建目录」（本地 / 远程 tab 均有）：输入名字即可就地创建并自动进入 |
 | 从局域网 / 另一台设备访问时插件文件能力全部报 403 | 2.4.10 起已修复：信任判定改用宿主 `ctx.webRuntime.trustedHosts`（与 `/api` 网关同源）。把访问地址加进 DSH 信任列表即可：启动时加 `--trusted-host <host[:port]>`（或经配对设备访问）；未配置时行为与之前一致（仅本机 loopback） |
+| 「文件」页签的「按文件名搜索」一输入就报 `Cannot read properties of undefined (reading 'length')` | 2.4.11 起已修复：`fs.search` 拦截此前只返回 `entries`，而 better-sidebar 客户端契约是 `{ matches, truncated }`；现在补上 `matches`（cwd 相对、`/` 分隔，与上游自带实现一致）并保留 `entries` |
+| 远程工作区里「按文件名搜索」一直转圈（大工作区） | 2.4.11 起已修复：改为浅层优先（`-maxdepth 3`，实测冷 0.68s / 热 0.11s）且**有命中就立即返回**（深挖转后台预热缓存，浅层零命中才同步等深挖 `-maxdepth 8`），遍历前剪噪声目录、去掉会阻塞短路的 `sort`，并加远端墙钟预算——到点返回**已收集的部分结果**并标记不完整。实测某 OpenFOAM 工作区：旧实现 5 分钟零输出 → 现在 **0.96s 返回 43 条** |
+| 远程会话里 `@文件名` 没有候选，但单独输入 `@` 有 | 2.4.11 起已修复：模糊查询依赖索引，而索引首选 `git ls-files --cached --others`（`--others` 要遍历整棵工作树，巨型项目上跑不完 → 索引为空）。现在三级降级（完整 git 6s → 仅索引 git 3s → 有界 `find` `maxdepth 3` + 5s），并在索引未就绪时用有界 find 即时兜底（实测 0.65s），不再出现「全空」 |
 | 安装时提示 `minimumReleaseAge` 或「No matching version」（刚发布） | npm 供应链新鲜度策略，等 1–5 分钟后重试即可 |
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |
