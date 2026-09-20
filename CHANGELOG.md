@@ -2,6 +2,18 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.10] — 非 loopback 访问不再全线 403：信任判定改用宿主 webRuntime.trustedHosts（issue #12）
+### 修复
+- **信任判定与 `/api` 网关、better-sidebar 同源**（感谢 @Linhaojing 的验证矩阵与自我更正后的方案）：此前 `isTrusted()` 硬编码 loopback 白名单（`localhost` / `127.0.0.1` / `::1` / `0.0.0.0`），从局域网（例如经配对设备或反向代理访问）打开 GUI 时，本插件的 **5 类路由全部 403** —— `/remote-ssh/api/*` 全部 RPC、6 个被拦截的 `fs.*`、`git.*`、文件上传、`/sidebar/file`，也就是文件树 / 读写 / 搜索 / 重命名 / 删除 / git / 上传全线失效，插件几乎等于没装。而同一 Host 下 DSH 官方路由正常，说明是本插件单方面比宿主更严。
+  - 现在改为读宿主官方运行时能力 **`ctx.webRuntime.trustedHosts`**（启动时采样的局域网 IP 字面量 + `--trusted-host` 指定的 authority）——与 `/api` 网关的 fence 及 better-sidebar 的 `src/trust-fence.ts` 完全一致（后者是 `@deepseek-ai/dsh-client-connection` 的 `api-request-trust.ts` 的拷贝，上游未导出这些 helper，故按同样方式复刻并在注释中标注来源）；
+  - **按请求实时读取** `trustedHosts`：用户改动信任列表无需重启插件；
+  - **软注入 `webRuntime`**（`ctx.inject(["webRuntime"])` 而非硬 `inject`）：万一宿主将来改名/移除该服务，插件仍能挂载，只是远程访问退回 loopback-only，行为与 2.4.10 之前一致——**零回归**；
+  - 安全性不降低：`sec-fetch-site: cross-site` 与新增的 **Origin 围栏**（带 Origin 时必须与本请求 hostname 一致；`Origin: null` 拒绝）都在，Host 白名单依旧存在，只是信任源从硬编码换成宿主权威列表；用户未配置信任列表时 `trustedHosts` 只含 loopback，行为与之前完全相同。
+- **403 文案不再误导**：此前无论何种拒绝原因都回 `missing x-requested-with header`，把排查方向带偏（提问者一开始就在查客户端是否漏带头）。现在按原因区分：缺头 → `missing x-requested-with header`（错误码仍为 `csrf`，保持兼容）、Host 不可信 → 明确提示 `untrusted host: … start DSH with --trusted-host <host[:port]> …`、跨站 → `cross-site request refused`、Origin 不符 → `origin does not match the request host`；`/sidebar/file` 的纯文本 403 也带准确原因。
+
+### 测试
+- 新增 `tests/trust-fence.test.mjs`（**61 条断言**）：loopback 判定（`localhost` / `[::1]` / `127.x.x.x` 整段 / 越界段拒绝 / `0.0.0.0` 历史放行）、authority 端口语义（条目带端口精确匹配、不带端口按主机名、无效条目跳过）、**逐条复现 issue #12 的验证矩阵**（`127.0.0.1:3080` ✅ / `localhost:3080` ✅ / 局域网 IP 无信任列表 ❌ / 局域网 IP + `trustedHosts` ✅）、cross-site 与 Origin 围栏（含 Edge 151 的「Origin 缺端口」特例与 `Origin: null` 拒绝）、文案区分（Host 被拒不再报缺头、并给出 `--trusted-host` 指引）、以及**组合行为**（提取真实 `requestTrust` + 桩 `trustedHosts`：可信局域网 + 缺头 → 报 `header`；信任列表被替换后立即生效）与接线断言（5 处调用点、软注入、实时读取、错误码兼容）。
+
 ## [2.4.9] — 「添加工作区」目录选择器支持新建目录（issue #11）
 ### 新增
 - **「添加工作区」弹窗的目录选择器新增「新建目录」**（感谢 @Linhaojing 的定位与接线建议）：此前本地 / 远程两个 tab 都只有「打开 / 上级 / 选择此目录」，要把**尚不存在**的目录加为工作区（例如远端起新项目 `~/lhj/new-project`）必须先跳出 DSH 用别的终端 `mkdir`。现在底部操作区多一个「📁 新建目录」按钮：点开输入行 → 填名字（回车即提交）→ 在当前 `path` 下创建 → **自动进入新目录**，紧接着点「选择此目录」即可成为工作区，全程不离开 DSH（对齐 VSCode「新建文件夹」的交互预期）。

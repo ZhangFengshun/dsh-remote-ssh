@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.9
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.10
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -202,6 +202,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | `@` 补全只搜到镜像里那几个文件 | 2.4.7 起已修复：远程工作区会话的 `@` 补全改列远端文件（索引缓存 60s + 900ms 查询预算）；若仍只有镜像文件，确认 2.4.7 已装入并重启 DSH |
 | 大仓里 `@` 搜不到真实文件（如根目录 `AGENTS.md`、`src/**`） | 2.4.8 起已修复：此前排除目录发生在截断之后，`node_modules/` 这类目录会吃光索引配额；现在排除由远端 `grep`/`-prune` 在截断前完成，并会在索引达上限时打 warn 提示 |
 | 想加的远程目录还不存在，「添加工作区」里没法创建 | 2.4.9 起「目录选择器」底部有「📁 新建目录」（本地 / 远程 tab 均有）：输入名字即可就地创建并自动进入 |
+| 从局域网 / 另一台设备访问时插件文件能力全部报 403 | 2.4.10 起已修复：信任判定改用宿主 `ctx.webRuntime.trustedHosts`（与 `/api` 网关同源）。把访问地址加进 DSH 信任列表即可：启动时加 `--trusted-host <host[:port]>`（或经配对设备访问）；未配置时行为与之前一致（仅本机 loopback） |
 | 安装时提示 `minimumReleaseAge` 或「No matching version」（刚发布） | npm 供应链新鲜度策略，等 1–5 分钟后重试即可 |
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |
