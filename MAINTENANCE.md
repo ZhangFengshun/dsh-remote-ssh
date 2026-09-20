@@ -108,10 +108,10 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
 ## 5. 维护备忘
 
 - **🔒 公开产物里绝不出现真实主机 / 账号 / 项目 / 路径 / 镜像 ID（2026-09-20 用户明令）**：
-  issue 回复、README、CHANGELOG、代码注释、测试夹具**一律用通用占位符**。曾把真实项目名
-  （OpenFOAM / kOmega / DFS-Dev / IB_Robot）、HPC 主机名、内网 IP、真实远程路径、镜像目录 ID
-  写进 issue 回复与仓库文档，属于信息泄露。占位符约定：
-  `proj-a` / `my-project` / `project-b`（项目）、`~/proj`、`~/work/my-project`（路径）、
+  issue 回复、README、CHANGELOG、代码注释、测试夹具**一律用通用占位符**。曾把真实项目名、
+  HPC 主机名、内网 IP、真实远程路径、镜像目录 ID 写进 issue 回复与仓库文档，属于信息泄露
+  （本文件早先的版本甚至把这些真实名字当"例子"列了出来 —— 记录规则时也不要写具体值）。
+  占位符约定：`proj-a` / `my-project` / `project-b`（项目）、`~/proj`、`~/work/my-project`（路径）、
   `hpc-a.example.com`（主机）、`192.0.2.10`（内网 IP，TEST-NET-1 文档网段）、
   `wmirror1`…（镜像 ID）、`solver`（查询词示例）。
   **发布前必查**（`gh-fix/scan-private.mjs` 同款逻辑，或直接 grep）：

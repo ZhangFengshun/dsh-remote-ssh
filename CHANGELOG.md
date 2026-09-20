@@ -2,6 +2,11 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.12] — 公开产物脱敏（无功能改动）
+### 变更
+- **移除文档、代码注释与测试夹具中的真实标识**：此前 CHANGELOG / README / 代码注释 / issue 回复里出现了真实的项目名、HPC 主机名、内网 IP、真实远程路径与镜像目录 ID。现已全部替换为通用占位符（`proj-a` / `my-project` / `project-b`、`~/proj`、`hpc-a.example.com`、`192.0.2.10`（TEST-NET-1 文档网段）、`wmirror1`…、`solver`），并在 `MAINTENANCE.md` 写入硬规则：**公开产物一律用占位符**，发布前跑一次私有标识扫描。README 七夕段落里刻意保留的署名不受影响。
+- **本版不含任何功能改动**：与 2.4.11 的代码逐字相同，仅为让 npm 上的 `latest` 产物不再包含上述标识（2.4.11 的 tarball 因 npm 撤回策略限制无法删除，见 `MAINTENANCE.md`）。
+
 ## [2.4.11] — `fs.search` 返回契约对齐 better-sidebar：补上 `matches`（issue #13）
 ### 修复
 - **「文件」页签的「按文件名搜索」不再崩掉整块页签**（感谢 @Linhaojing 的契约考古与最小复现）：better-sidebar 客户端契约是 `{ matches: string[], truncated }`（其注释原文：*matches are cwd-relative '/'-separated paths*，自 v0.13.0 引入搜索框起未变），并在渲染阶段直接读 `results.matches.length` / `results.matches.map(rel => …)`；而本插件的 `fs.search` 拦截只返回 `{ entries: [{path,isDir}], truncated }`，于是 `undefined.length` 抛 TypeError 被 `RenderBoundary` 兜住 → 整个页签变成错误条、搜索框与文件树一起消失。因为拦截是**无条件**的（不区分远程/本地会话），**本地工作区同样复现**，与 better-sidebar 版本无关。
