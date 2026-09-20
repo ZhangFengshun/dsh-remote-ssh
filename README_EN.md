@@ -46,7 +46,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.12
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.13
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -207,6 +207,7 @@ The plugin never patches DSH sources or injects into the profile dependency tree
 | "Search by file name" spins forever in a remote workspace (large trees) | Fixed in 2.4.11: shallow-first (`-maxdepth 3`, measured 0.68s cold / 0.11s warm) **returning as soon as anything matches** (the deeper pass becomes a background cache warm-up and only runs synchronously when the shallow pass finds nothing), noise directories pruned before traversal, the short-circuit-blocking `sort` removed, and a remote wall-clock budget that returns the **partial results collected so far** and flags them as incomplete. Measured on an 大型项目 workspace: 5 minutes with zero output before → **43 matches in 0.96s** now |
 | In a remote session `@filename` shows no candidates, while a bare `@` works | Fixed in 2.4.11: fuzzy queries rely on the index, and the index preferred `git ls-files --cached --others` (`--others` must walk the whole working tree and never finishes on huge projects → empty index). It now degrades in three budgeted steps (full git 6s → index-only git 3s → bounded `find` `maxdepth 3` + 5s) and falls back to a bounded `find` (measured 0.65s) whenever the index is not ready yet, so candidates are never empty |
 | Install fails with `minimumReleaseAge` or "No matching version" right after a release | npm supply-chain freshness policy — retry after 1–5 minutes |
+| `remote_ssh_push` / `remote_ssh_sync` report `returned invalid output` even though the push succeeded | Fixed in 2.4.13: their shared output schema marked `error` as required while the success path returned an undeclared `remotePath`/`mirrorPath`, so **only success failed** (failures validated fine). The schema now declares both path fields, `error` is optional, the success paths carry `error: ""`, and every output schema in the file treats `error` as optional |
 | A command hangs forever | The 120s timeout discards the pooled session automatically; use `timeoutMs: 0` for long jobs and `remote_ssh_kill` at any time |
 | Large files are truncated | 4MB per read, ≈6.29MB on the pooled download path (larger files fall back to a one-shot connection); use `remote_ssh_exec` with `head`/`tail` to page through |
 

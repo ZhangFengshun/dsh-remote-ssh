@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.12
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.13
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -207,6 +207,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 远程工作区里「按文件名搜索」一直转圈（大工作区） | 2.4.11 起已修复：改为浅层优先（`-maxdepth 3`，实测冷 0.68s / 热 0.11s）且**有命中就立即返回**（深挖转后台预热缓存，浅层零命中才同步等深挖 `-maxdepth 8`），遍历前剪噪声目录、去掉会阻塞短路的 `sort`，并加远端墙钟预算——到点返回**已收集的部分结果**并标记不完整。实测某大型远程项目工作区：旧实现 5 分钟零输出 → 现在 **0.96s 返回 43 条** |
 | 远程会话里 `@文件名` 没有候选，但单独输入 `@` 有 | 2.4.11 起已修复：模糊查询依赖索引，而索引首选 `git ls-files --cached --others`（`--others` 要遍历整棵工作树，巨型项目上跑不完 → 索引为空）。现在三级降级（完整 git 6s → 仅索引 git 3s → 有界 `find` `maxdepth 3` + 5s），并在索引未就绪时用有界 find 即时兜底（实测 0.65s），不再出现「全空」 |
 | 安装时提示 `minimumReleaseAge` 或「No matching version」（刚发布） | npm 供应链新鲜度策略，等 1–5 分钟后重试即可 |
+| `remote_ssh_push` / `remote_ssh_sync` 明明推送成功却报 `returned invalid output` | 2.4.13 起已修复：这两个工具共用的 output schema 把 `error` 标成必填、成功路径又返回未声明的 `remotePath`/`mirrorPath`，于是**只有成功会报错**（失败路径反而合法）。现在 schema 声明两个路径字段、`error` 改为可选，成功路径也带 `error: ""`；全文件所有 output schema 的 `error` 一并改为可选 |
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |
 

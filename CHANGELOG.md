@@ -2,6 +2,16 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.13] — `remote_ssh_push` / `remote_ssh_sync` 成功却报 `returned invalid output`（issue #14）
+### 修复
+- **推送成功却被判为工具输出非法**（感谢 @Linhaojing 的根因定位与复现）：`sync` / `push` 共用的 output schema 把 `error` 声明为**必填**且 `additionalProperties: false`，而两条成功路径返回 `{ ok: true, mirrorPath }` / `{ ok: true, remotePath }` —— 成功时既缺 `error` 又带未声明字段，必然被 output 校验拒掉；**失败路径反而合法**，于是症状是「**只有成功会报错**」：模型看到 `Error: tool "remote_ssh_push" returned invalid output: missing required property "value.error"; "value.remotePath" is not a declared property`，但远端文件其实已经写好了，只能靠再跑一次 `ls`/`sha256sum` 确认，很容易误判成需要重试。而这条链路正是远程工作区里 agent `write`/`edit` 落回远端的唯一通道，成功信号不可信影响面不小。
+  - `syncOutput` 现在声明 `remotePath` / `mirrorPath`（成功路径本来就会带），`error` 改为**可选**；
+  - 两条成功路径补上 `error: ""`，与同文件其它工具（`normExec()`、`remote_ssh_ls` / `cat` / `grep` / `glob`）的风格一致；
+  - **并把全文件 6 处 output schema 的 `error` 一律改为可选**（通用护栏：`error` 按定义在成功时不存在，标必填就是定时炸弹）。失败路径的 `{ ok: false, error }` 不受影响。
+
+### 测试
+- 新增 `tests/tool-output-schema.test.mjs`（**17 条断言**）：用**真实的 `remoteSyncUp` / `remoteSyncDown`**（桩掉 `subprocess`）取实际返回对象，再用**真实的 `syncOutput.schema`** 跑一个模拟宿主校验器的 mini-validator（必填齐全 + 无未声明字段 + 类型正确）——成功路径、参数缺失失败路径、非零退出码失败路径全部通过校验；另有静态护栏断言（**任何** output schema 都不得把 `error` 标成必填、`ok` 仍必填、两个路径字段已声明）与**反向自检**（把历史的坏 schema 喂给校验器，逐字复现报告者看到的 `missing required property "value.error"; "value.mirrorPath" is not a declared property`）。
+
 ## [2.4.12] — 公开产物脱敏（无功能改动）
 ### 变更
 - **移除文档、代码注释与测试夹具中的真实标识**：此前 CHANGELOG / README / 代码注释 / issue 回复里出现了真实的项目名、HPC 主机名、内网 IP、真实远程路径与镜像目录 ID。现已全部替换为通用占位符（`proj-a` / `my-project` / `project-b`、`~/proj`、`hpc-a.example.com`、`192.0.2.10`（TEST-NET-1 文档网段）、`wmirror1`…、`solver`），并在 `MAINTENANCE.md` 写入硬规则：**公开产物一律用占位符**，发布前跑一次私有标识扫描。README 七夕段落里刻意保留的署名不受影响。
