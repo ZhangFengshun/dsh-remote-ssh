@@ -48,12 +48,12 @@ console.log('A · 目录名校验 newDirNameError')
 
 console.log('A2 · 路径拼接 joinChild')
 {
-  check(helpers.joinChild('/home/u/lhj', 'new') === '/home/u/lhj/new', 'POSIX 基路径')
-  check(helpers.joinChild('/home/u/lhj/', 'new') === '/home/u/lhj/new', '去掉基路径尾部分隔符')
-  check(helpers.joinChild('/home/u/lhj///', 'new') === '/home/u/lhj/new', '多个尾部分隔符')
+  check(helpers.joinChild('/home/u/work', 'new') === '/home/u/work/new', 'POSIX 基路径')
+  check(helpers.joinChild('/home/u/work/', 'new') === '/home/u/work/new', '去掉基路径尾部分隔符')
+  check(helpers.joinChild('/home/u/work///', 'new') === '/home/u/work/new', '多个尾部分隔符')
   check(helpers.joinChild('', 'new') === 'new', '空基路径 → 纯名字')
   check(helpers.joinChild('/', 'new') === '/new', '根路径 → /new')
-  check(helpers.joinChild('~/lhj', 'new') === '~/lhj/new', '~ 前缀（远端常见）')
+  check(helpers.joinChild('~/work', 'new') === '~/work/new', '~ 前缀（远端常见）')
   check(helpers.joinChild('C:\\Users\\me', 'new') === 'C:\\Users\\me\\new', 'Windows 基路径沿用反斜杠')
   check(helpers.joinChild('C:\\', 'new') === 'C:\\new', 'Windows 盘符根')
   check(helpers.joinChild('/home/u', '中文') === '/home/u/中文', '非 ASCII 名字')
@@ -71,7 +71,7 @@ console.log('B · 组件行为（真实 submitNewDir 逻辑 + 桩状态）')
     const fn = new Function('newDir', 'path', 'props', 'setNewDir', 't', 'load', 'newDirNameError', 'joinChild',
       src + '\nreturn submitNewDir;')(
       newDirState,
-      (opts && opts.path !== undefined) ? opts.path : '/home/u/lhj',
+      (opts && opts.path !== undefined) ? opts.path : '/home/u/work',
       {
         createFn: (p, name) => {
           calls.create++
@@ -101,16 +101,16 @@ console.log('B · 组件行为（真实 submitNewDir 逻辑 + 桩状态）')
     check(r.calls.create === 0 && r.states[0].error === 'T:picker.errNameEmpty', '空名：拦截并提示')
   }
   {
-    const r = await run({ name: 'new-project', busy: false, error: null }, { ok: true, path: '/home/u/lhj/new-project' })
-    check(r.calls.create === 1 && r.calls.createArgs[0] === '/home/u/lhj' && r.calls.createArgs[1] === 'new-project',
+    const r = await run({ name: 'new-project', busy: false, error: null }, { ok: true, path: '/home/u/work/new-project' })
+    check(r.calls.create === 1 && r.calls.createArgs[0] === '/home/u/work' && r.calls.createArgs[1] === 'new-project',
       '合法名：以（当前目录, 名字）调用 createFn')
-    check(r.loads.length === 1 && r.loads[0] === '/home/u/lhj/new-project', '成功后进入新目录（便于紧接着「选择此目录」）')
+    check(r.loads.length === 1 && r.loads[0] === '/home/u/work/new-project', '成功后进入新目录（便于紧接着「选择此目录」）')
     check(r.states.some((s) => s === null), '成功后收起输入行（setNewDir(null)）')
     check(r.states.some((s) => s && s.busy === true), '提交中置 busy（按钮禁用/文案切换）')
   }
   {
     const r = await run({ name: 'x', busy: false, error: null }, { ok: true }) // 后端没回 path
-    check(r.loads[0] === '/home/u/lhj/x', '后端未回 path 时回退 joinChild(path, name)')
+    check(r.loads[0] === '/home/u/work/x', '后端未回 path 时回退 joinChild(path, name)')
   }
   {
     const r = await run({ name: 'x', busy: false, error: null }, { ok: false, error: '远端只读' })

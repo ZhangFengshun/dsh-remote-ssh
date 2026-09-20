@@ -107,6 +107,22 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
 
 ## 5. 维护备忘
 
+- **🔒 公开产物里绝不出现真实主机 / 账号 / 项目 / 路径 / 镜像 ID（2026-09-20 用户明令）**：
+  issue 回复、README、CHANGELOG、代码注释、测试夹具**一律用通用占位符**。曾把真实项目名
+  （OpenFOAM / kOmega / DFS-Dev / IB_Robot）、HPC 主机名、内网 IP、真实远程路径、镜像目录 ID
+  写进 issue 回复与仓库文档，属于信息泄露。占位符约定：
+  `proj-a` / `my-project` / `project-b`（项目）、`~/proj`、`~/work/my-project`（路径）、
+  `hpc-a.example.com`（主机）、`192.0.2.10`（内网 IP，TEST-NET-1 文档网段）、
+  `wmirror1`…（镜像 ID）、`solver`（查询词示例）。
+  **发布前必查**（`gh-fix/scan-private.mjs` 同款逻辑，或直接 grep）：
+
+  ```powershell
+  node <scratch>\scan-private.mjs <repo>     # 枚举镜像 ID / 主机名 / 账号 / 真实路径 / 项目名 / 内网 IP
+  ```
+
+  唯一允许保留的私人字样是 README 七夕段落里的署名 `zhangyi`（刻意保留的私人寄语，见下条）。
+  发布后若发现泄露：先改 issue 评论（`gh api -X PATCH .../issues/comments/<id> --input <payload.json>`）
+  与仓库文件，再处理 npm 产物（`npm unpublish <pkg>@<ver>` 后重新发布同一版本，或发新补丁版）。
 - **🚨 改完 `lib/index.js` 必须跑模块加载冒烟（2026-09-20 血的教训）**：曾把
   `const REMOTE_SEARCH_SKIP_DIRS = new Set([...REF_EXCLUDED_DIRS, …])` 写在
   `REF_EXCLUDED_DIRS` 定义**之前** —— 模块级 `const` 的展开会在模块求值期立即读取该绑定，

@@ -1,6 +1,6 @@
 // 远程文件名搜索的两趟策略 / 预算 / 缓存回归测试（issue #13 实测跟进）。
 //
-// 背景：侧栏「按文件名搜索」在真实 OpenFOAM 工作区一直「加载中…」——旧命令
+// 背景：侧栏「按文件名搜索」在真实的大型远程项目工作区一直「加载中…」——旧命令
 //   `find <root> -name '*q*' -printf '%p\n' | sort | head -n 500`
 // 有两个致命点：① `sort` 缓冲全部 find 输出，`head` 的提前短路失效；② 无深度/时间约束，
 // 而 find 是深度优先，巨型子目录会吃光预算，连顶层文件都轮不到（实测 5 分钟无输出）。
@@ -57,7 +57,7 @@ const api = new Function(code + `
 let pass = 0, fail = 0
 const check = (cond, label) => { if (cond) { pass++; console.log('  ✓ ' + label) } else { fail++; console.log('  ✗ FAIL: ' + label) } }
 
-const ROOT = '~/user/zfs/case/OpenFOAM_GPT'
+const ROOT = '~/proj'
 const PROFILE = { id: 'p1', host: 'h', user: 'u' }
 
 /** 可编排的桩 runner：按调用序返回预设结果，并记录命令。 */
@@ -82,7 +82,7 @@ const info = (cmd) => ({
 console.log('A · 命令生成（两趟）')
 {
   const s = stubRunner([{ ok: true, stdout: '' }])
-  await api.remoteSearch(s.runner, PROFILE, ROOT, 'kOmega')
+  await api.remoteSearch(s.runner, PROFILE, ROOT, 'solver')
   check(s.cmds.length === 2, '未找满时跑两趟（浅层 + 深挖）')
   const a = info(s.cmds[0]), b = info(s.cmds[1])
   check(a.maxdepth === String(api.REF_SEARCH_SHALLOW_DEPTH), `浅层趟 -maxdepth ${a.maxdepth}`)

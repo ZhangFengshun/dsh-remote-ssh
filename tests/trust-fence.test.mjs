@@ -50,7 +50,7 @@ console.log('A1 · isLoopbackHostname')
   check(fence.isLoopbackHostname('0.0.0.0') === true, '0.0.0.0（本插件历史放行，注释已说明）')
   check(fence.isLoopbackHostname('128.0.0.1') === false, '128.0.0.1 不是 loopback')
   check(fence.isLoopbackHostname('127.0.0.256') === false, '越界段 127.0.0.256 不是 loopback')
-  check(fence.isLoopbackHostname('192.168.136.169') === false, '局域网 IP 不是 loopback')
+  check(fence.isLoopbackHostname('192.0.2.10') === false, '局域网 IP 不是 loopback')
   check(fence.isLoopbackHostname('example.com') === false, '域名不是 loopback')
 }
 
@@ -58,29 +58,29 @@ console.log('A2 · authority 解析与匹配（端口语义）')
 {
   check(fence.parseAuthority('127.0.0.1:3080') instanceof URL, '可解析 authority')
   check(fence.parseAuthority('bad host') === undefined, '不可解析 → undefined')
-  const url = fence.parseAuthority('192.168.136.169:3080')
-  check(fence.canonicalAuthority('192.168.136.169:3080', url) === '192.168.136.169:3080', '带端口 → hostname:port')
-  const url2 = fence.parseAuthority('192.168.136.169')
-  check(fence.canonicalAuthority('192.168.136.169', url2) === '192.168.136.169', '不带端口 → 仅 hostname')
-  check(fence.isTrustedAuthority(fence.parseAuthority('192.168.136.169:3080'), ['192.168.136.169:3080']) === true, '条目带端口：精确匹配')
-  check(fence.isTrustedAuthority(fence.parseAuthority('192.168.136.169:9999'), ['192.168.136.169:3080']) === false, '条目带端口：端口不符则拒绝')
-  check(fence.isTrustedAuthority(fence.parseAuthority('192.168.136.169:9999'), ['192.168.136.169']) === true, '条目不带端口：该主机任意端口都算')
-  check(fence.isTrustedAuthority(fence.parseAuthority('10.0.0.5:3080'), ['192.168.136.169:3080']) === false, '主机不符 → 拒绝')
-  check(fence.isTrustedAuthority(fence.parseAuthority('192.168.136.169:3080'), []) === false, '空信任列表 → 拒绝')
-  check(fence.isTrustedAuthority(fence.parseAuthority('192.168.136.169:3080'), ['not a host', '192.168.136.169:3080']) === true, '无效条目被跳过，有效条目仍命中')
+  const url = fence.parseAuthority('192.0.2.10:3080')
+  check(fence.canonicalAuthority('192.0.2.10:3080', url) === '192.0.2.10:3080', '带端口 → hostname:port')
+  const url2 = fence.parseAuthority('192.0.2.10')
+  check(fence.canonicalAuthority('192.0.2.10', url2) === '192.0.2.10', '不带端口 → 仅 hostname')
+  check(fence.isTrustedAuthority(fence.parseAuthority('192.0.2.10:3080'), ['192.0.2.10:3080']) === true, '条目带端口：精确匹配')
+  check(fence.isTrustedAuthority(fence.parseAuthority('192.0.2.10:9999'), ['192.0.2.10:3080']) === false, '条目带端口：端口不符则拒绝')
+  check(fence.isTrustedAuthority(fence.parseAuthority('192.0.2.10:9999'), ['192.0.2.10']) === true, '条目不带端口：该主机任意端口都算')
+  check(fence.isTrustedAuthority(fence.parseAuthority('10.0.0.5:3080'), ['192.0.2.10:3080']) === false, '主机不符 → 拒绝')
+  check(fence.isTrustedAuthority(fence.parseAuthority('192.0.2.10:3080'), []) === false, '空信任列表 → 拒绝')
+  check(fence.isTrustedAuthority(fence.parseAuthority('192.0.2.10:3080'), ['not a host', '192.0.2.10:3080']) === true, '无效条目被跳过，有效条目仍命中')
 }
 
 console.log('A3 · trustVerdict：issue #12 的验证矩阵')
 {
   check(fence.trustVerdict(req({ host: '127.0.0.1:3080' }), []) === 'ok', 'Host 127.0.0.1:3080 → ok')
   check(fence.trustVerdict(req({ host: 'localhost:3080' }), []) === 'ok', 'Host localhost:3080 → ok')
-  check(fence.trustVerdict(req({ host: '192.168.136.169:3080' }), []) === 'bad-host', '局域网 IP 且无信任列表 → bad-host（原 bug）')
-  check(fence.trustVerdict(req({ host: '192.168.136.169:3080' }), ['192.168.136.169:3080']) === 'ok', '局域网 IP + 宿主信任列表 → ok（修复）')
-  check(fence.trustVerdict(req({ host: '192.168.136.169:3080' }), ['192.168.136.169']) === 'ok', '信任条目不带端口也可放行')
+  check(fence.trustVerdict(req({ host: '192.0.2.10:3080' }), []) === 'bad-host', '局域网 IP 且无信任列表 → bad-host（原 bug）')
+  check(fence.trustVerdict(req({ host: '192.0.2.10:3080' }), ['192.0.2.10:3080']) === 'ok', '局域网 IP + 宿主信任列表 → ok（修复）')
+  check(fence.trustVerdict(req({ host: '192.0.2.10:3080' }), ['192.0.2.10']) === 'ok', '信任条目不带端口也可放行')
   check(fence.trustVerdict(req({}), []) === 'no-host', '无 Host → no-host')
   check(fence.trustVerdict(req({ host: 'not a host' }), []) === 'bad-host', 'Host 不可解析 → bad-host')
   check(fence.trustVerdict(req({ host: '127.0.0.1:3080', 'sec-fetch-site': 'cross-site' }), []) === 'cross-site', 'cross-site 即便 loopback 也拒绝')
-  check(fence.trustVerdict(req({ host: '192.168.136.169:3080', 'sec-fetch-site': 'cross-site' }), ['192.168.136.169:3080']) === 'cross-site', 'cross-site 即便可信主机也拒绝')
+  check(fence.trustVerdict(req({ host: '192.0.2.10:3080', 'sec-fetch-site': 'cross-site' }), ['192.0.2.10:3080']) === 'cross-site', 'cross-site 即便可信主机也拒绝')
   check(fence.trustVerdict(req({ host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' }), []) === 'ok', 'Origin 与 Host 一致 → ok')
   check(fence.trustVerdict(req({ host: '127.0.0.1:3080', origin: 'http://127.0.0.1' }), []) === 'ok', 'Origin 缺端口（Edge 151 序列化）仍 ok')
   check(fence.trustVerdict(req({ host: '127.0.0.1:3080', origin: 'http://evil.example' }), []) === 'bad-origin', 'Origin 不同 → bad-origin')
@@ -115,19 +115,19 @@ console.log('B · 组合行为：真实 requestTrust + 桩 trustedHosts')
   check(local(req({ host: '127.0.0.1:3080' }), true) === 'header', '本机 + 缺头（需头路由）→ header')
   check(local(req({ host: '127.0.0.1:3080' }), false) === 'ok', '本机 + 不需头路由 → ok')
 
-  const lan = make(['192.168.136.169:3080'])
-  check(lan(req({ host: '192.168.136.169:3080', 'x-requested-with': 'XMLHttpRequest' }), true) === 'ok', '可信局域网 + 带头 → ok（修复目标）')
-  check(lan(req({ host: '192.168.136.169:3080' }), true) === 'header', '可信局域网 + 缺头 → 报 header（原因准确）')
-  check(lan(req({ host: '192.168.136.169:3080' }), false) === 'ok', '可信局域网（fs.* 等不需头路由）→ ok')
+  const lan = make(['192.0.2.10:3080'])
+  check(lan(req({ host: '192.0.2.10:3080', 'x-requested-with': 'XMLHttpRequest' }), true) === 'ok', '可信局域网 + 带头 → ok（修复目标）')
+  check(lan(req({ host: '192.0.2.10:3080' }), true) === 'header', '可信局域网 + 缺头 → 报 header（原因准确）')
+  check(lan(req({ host: '192.0.2.10:3080' }), false) === 'ok', '可信局域网（fs.* 等不需头路由）→ ok')
   check(lan(req({ host: '10.1.1.1:3080', 'x-requested-with': 'XMLHttpRequest' }), true) === 'bad-host', '未列入信任列表的主机仍拒绝')
 
   // 实时读取：信任列表变化后无需重启（桩每次调用返回新值）
   let live = []
   const liveTrust = new Function('trustVerdict', 'trustedHostsNow', 'hasRequestedWithHeader',
     requestTrustSrc + '\nreturn requestTrust;')(fence.trustVerdict, () => live, fence.hasRequestedWithHeader)
-  const lanReq = req({ host: '192.168.136.169:3080' })
+  const lanReq = req({ host: '192.0.2.10:3080' })
   check(liveTrust(lanReq, false) === 'bad-host', '信任列表为空 → 拒绝')
-  live = ['192.168.136.169:3080']
+  live = ['192.0.2.10:3080']
   check(liveTrust(lanReq, false) === 'ok', '信任列表被替换后立即生效（按请求实时读取）')
 }
 

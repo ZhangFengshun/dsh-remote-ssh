@@ -79,9 +79,9 @@ function runScenario(name, connInfo) {
 
 const keyProfile = { host: 'hpc.example.org', user: 'wxq', port: 2222, keyPath: '/home/u/.ssh/id_ed25519' }
 
-console.log('场景 1 · remotePath = ~/lhj/IB_Robot（issue #7 主场景）')
+console.log('场景 1 · remotePath = ~/work/my-project（issue #7 主场景）')
 {
-  const { spawns } = runScenario('tilde-sub', { ...keyProfile, remotePath: '~/lhj/IB_Robot' })
+  const { spawns } = runScenario('tilde-sub', { ...keyProfile, remotePath: '~/work/my-project' })
   check(spawns.length === 1, '只 spawn 一次（ssh）')
   const { bin, args } = spawns[0]
   check(args[0] === '-tt', '带 -tt 交互式通道')
@@ -89,9 +89,9 @@ console.log('场景 1 · remotePath = ~/lhj/IB_Robot（issue #7 主场景）')
   check(args.includes('-i') && args.includes(keyProfile.keyPath), '带密钥')
   check(args[args.length - 2] === 'wxq@hpc.example.org', '目标 user@host 正确')
   const cmd = args[args.length - 1]
-  check(cmd === 'cd "$HOME/lhj/IB_Robot" 2>/dev/null || cd "$HOME"; exec "${SHELL:-/bin/bash}" -l',
+  check(cmd === 'cd "$HOME/work/my-project" 2>/dev/null || cd "$HOME"; exec "${SHELL:-/bin/bash}" -l',
     '远程命令：远端展开 ~ + 失败回退 $HOME + exec 登录 shell')
-  check(cmd.includes('$HOME/lhj/IB_Robot') && !cmd.includes('/home/u/lhj'), '~ 交给远端展开（未用本地 homedir）')
+  check(cmd.includes('$HOME/work/my-project') && !cmd.includes('/home/u/work'), '~ 交给远端展开（未用本地 homedir）')
   check(bin.length > 0, `ssh 可执行文件解析为 ${bin}`)
 }
 

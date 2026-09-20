@@ -1,5 +1,5 @@
 // 文件树根标签回归测试（issue #9）：远程工作区的「文件」页签树根应显示远程目录名
-// （IB_Robot），而不是本地镜像目录 ID（wmu3sxe24jpvg）。
+// （my-project），而不是本地镜像目录 ID（wmirror3）。
 //
 // 做法：从 lib/client.js 提取**真实**的 refreshRootLabels / isRootRow / fixRootLabel /
 // watchRootLabel / recheckRootLabels / applyRootLabelsIn 函数文本，配一个极简 DOM 桩执行，
@@ -85,39 +85,39 @@ function buildTree(mirrorBase, childBase) {
   return { body, rootRow, rootSpan, childRow, childSpan }
 }
 
-const MIRROR = 'wmu3sxe24jpvg'
+const MIRROR = 'wmirror3'
 
 console.log('场景 1 · 远程工作区：根行标签替换为远程目录名')
 {
   const t = buildTree(MIRROR, 'src')
-  api.refreshRootLabels([{ mirrorPath: 'C:\\Users\\me\\.dsh\\remote-workspaces\\' + MIRROR, remotePath: '~/lhj/IB_Robot' }])
+  api.refreshRootLabels([{ mirrorPath: 'C:\\Users\\me\\.dsh\\remote-workspaces\\' + MIRROR, remotePath: '~/work/my-project' }])
   api.applyRootLabelsIn(t.body)
-  check(t.rootSpan.textContent === 'IB_Robot', '根标签 → IB_Robot')
+  check(t.rootSpan.textContent === 'my-project', '根标签 → my-project')
   check(t.rootSpan.getAttribute('data-rssh-root-label') === '1', '打上幂等标记')
-  check(t.rootSpan.getAttribute('title') === '~/lhj/IB_Robot', '悬停 title = 完整远程路径')
+  check(t.rootSpan.getAttribute('title') === '~/work/my-project', '悬停 title = 完整远程路径')
   check(t.childSpan.textContent === 'src', '子行未被触碰（假阳性防护：非根行）')
-  check(JSON.stringify(api.dump()) === JSON.stringify({ [MIRROR]: { label: 'IB_Robot', remotePath: '~/lhj/IB_Robot' } }),
+  check(JSON.stringify(api.dump()) === JSON.stringify({ [MIRROR]: { label: 'my-project', remotePath: '~/work/my-project' } }),
     '镜像 basename → 远程 basename 映射正确')
 }
 
 console.log('场景 2 · 幂等：重复 apply 不产生副作用')
 {
   const t = buildTree(MIRROR, 'src')
-  api.refreshRootLabels([{ mirrorPath: '/home/me/.dsh/remote-workspaces/' + MIRROR, remotePath: '/data/proj/IB_Robot' }])
+  api.refreshRootLabels([{ mirrorPath: '/home/me/.dsh/remote-workspaces/' + MIRROR, remotePath: '/data/proj/my-project' }])
   api.applyRootLabelsIn(t.body)
   api.applyRootLabelsIn(t.body)
   api.recheckRootLabels()
-  check(t.rootSpan.textContent === 'IB_Robot', '仍为 IB_Robot（无重复替换）')
+  check(t.rootSpan.textContent === 'my-project', '仍为 my-project（无重复替换）')
 }
 
 console.log('场景 3 · React 还原文本后，1s 复检自愈')
 {
   const t = buildTree(MIRROR, 'src')
-  api.refreshRootLabels([{ mirrorPath: '/x/' + MIRROR, remotePath: '~/lhj/IB_Robot' }])
+  api.refreshRootLabels([{ mirrorPath: '/x/' + MIRROR, remotePath: '~/work/my-project' }])
   api.applyRootLabelsIn(t.body)
   t.rootSpan.textContent = MIRROR      // 模拟 React 重渲染还原成镜像 ID
   api.recheckRootLabels()
-  check(t.rootSpan.textContent === 'IB_Robot', '复检后恢复为远程目录名')
+  check(t.rootSpan.textContent === 'my-project', '复检后恢复为远程目录名')
 }
 
 console.log('场景 4 · 本地工作区（无映射）与同名干扰项')
@@ -127,11 +127,11 @@ console.log('场景 4 · 本地工作区（无映射）与同名干扰项')
   api.applyRootLabelsIn(t.body)
   check(t.rootSpan.textContent === 'local-proj', '无映射时原样保留')
   // 远程文件恰好与镜像目录同名：非根行 → 不动
-  const t2 = buildTree('IB_Robot', MIRROR)
-  api.refreshRootLabels([{ mirrorPath: '/x/' + MIRROR, remotePath: '~/lhj/IB_Robot' }])
+  const t2 = buildTree('my-project', MIRROR)
+  api.refreshRootLabels([{ mirrorPath: '/x/' + MIRROR, remotePath: '~/work/my-project' }])
   api.applyRootLabelsIn(t2.body)
   check(t2.childSpan.textContent === MIRROR, '与镜像同名的子条目不被误改')
-  check(t2.rootSpan.textContent === 'IB_Robot', '而根行（若同名）仍按规则处理')
+  check(t2.rootSpan.textContent === 'my-project', '而根行（若同名）仍按规则处理')
 }
 
 console.log('场景 5 · 根行判据的容错')
@@ -156,7 +156,7 @@ console.log('场景 5 · 根行判据的容错')
 
 console.log('场景 6 · 镜像名与远程名相同的边界')
 {
-  api.refreshRootLabels([{ mirrorPath: '/x/' + MIRROR, remotePath: '~/lhj/' + MIRROR }])
+  api.refreshRootLabels([{ mirrorPath: '/x/' + MIRROR, remotePath: '~/work/' + MIRROR }])
   check(Object.keys(api.dump()).length === 0, '同名时不入映射表（无需替换）')
 }
 

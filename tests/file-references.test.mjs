@@ -127,8 +127,8 @@ console.log('A4 · 隐藏文件可见性')
 
 console.log('A5 · 索引命令生成')
 {
-  const cmd = api.refIndexCommand('~/lhj/IB_Robot')
-  check(cmd.includes("cd ~/'lhj/IB_Robot'") || cmd.includes('cd ~/'), 'cd 使用 shellQuotePath（~ 保持未引号）')
+  const cmd = api.refIndexCommand('~/work/my-project')
+  check(cmd.includes("cd ~/'work/my-project'") || cmd.includes('cd ~/'), 'cd 使用 shellQuotePath（~ 保持未引号）')
   check(/git ls-files --cached --others --exclude-standard/.test(cmd), 'git 仓库优先走 git ls-files（含未跟踪、尊重 .gitignore）')
   check(/command -v timeout/.test(cmd), 'git 那一步有墙钟预算（大仓库上 --others 会跑不完）')
   check(/git ls-files --cached 2>\/dev\/null/.test(cmd), '完整 git 为空时回退到仅索引 git（恒定快）')
@@ -156,7 +156,7 @@ console.log('B · 服务包装（远程走 SSH / 本地委托 / 异常降级）'
       return { remoteRefListForAgent, installFileReferenceBridge };`)
     const mod = f({
       remoteRefList: async (profile, root, query) => { calls.remote++; if (opts.remoteThrows) throw new Error('ssh down'); return opts.remoteResult || [] },
-      readRemoteInfoSync: (cwd) => (opts.remote ? { profileId: 'p1', host: 'h', user: 'u', keyPath: 'k', remotePath: '~/lhj/IB_Robot' } : null),
+      readRemoteInfoSync: (cwd) => (opts.remote ? { profileId: 'p1', host: 'h', user: 'u', keyPath: 'k', remotePath: '~/work/my-project' } : null),
       getProfile: (id) => (id === 'p1' ? { id: 'p1', host: 'h', user: 'u' } : undefined),
     })
     return { mod, calls }
@@ -170,7 +170,7 @@ console.log('B · 服务包装（远程走 SSH / 本地委托 / 异常降级）'
     const { mod, calls } = mk({ remote: true, remoteResult: [{ path: 'src/main.jl', kind: 'file' }] })
     const s = svc([{ path: 'README.md', kind: 'file' }])
     const restore = mod.installFileReferenceBridge({ get: () => s })
-    const out = await s.list({ session: { header: { cwd: '/mirror/wmtpsuc17vcd6' } } }, 'main', { aborted: false })
+    const out = await s.list({ session: { header: { cwd: '/mirror/wmirror2' } } }, 'main', { aborted: false })
     check(calls.remote === 1 && s._o.calls === 0, '远程会话：走远端实现，未调用原实现')
     check(out.length === 1 && out[0].path === 'src/main.jl', '返回远端候选')
     restore()
