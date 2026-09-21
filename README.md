@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.13
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.14
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -215,6 +215,8 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 
 插件注册 6 个 exact 路由（`/sidebar/api/fs.tree`、`fs.read`、`fs.write`、`fs.search`，以及 better-sidebar 0.19 新增的 `fs.rename`、`fs.remove`），在 better-sidebar 的 prefix 路由之前拦截。会话 cwd 含 `.remote-ssh.json` 时走 SSH，否则走本地 fs。客户端看到的是本地镜像路径，Host 自动转换为远程路径——对客户端完全透明。
 
+**模型侧的文件工具（agent 的 `write`/`edit`）**走的是**进程内** `ctx.fs`（宿主 base bundle 挂的是本地 `fs-sandbox`），不经过任何 HTTP 路由，因此 2.4.13 及以前只落**本地镜像**——用户在远端机器上找不到文件，只能人工 `remote_ssh_push`。2.4.14 起插件包装 `ctx.fs` 的 `writeText`/`editText`：**原写入照旧**（镜像内容、沙箱围栏、写意图语义全不变），成功后把同一份内容**定向推回远端对应的那个文件**（不是整镜像 tar，避免用旧镜像覆盖远端其它文件），写前自动 `mkdir -p` 远端父目录。推送失败只记一条 warn——本地写入已成功，桥接层不会让写操作变成失败；包装不可用时（服务缺失/被替换）退回旧行为并在日志提示。
+
 远程读取采用**单往返合并读**：一条池化命令同时返回 `size/mtime` 帧与文件内容（文本类扩展名优先 raw 直传，字节长 + U+FFFD 双校验失败自动回退 base64，结果逐字节一致）；配合主机侧结果缓存与变更失效（见下节）。
 
 Shell wrapper（`~/.dsh/remote-ssh/dsh-remote-shell[.cmd]`）检测工作区 `.remote-ssh.json`，自动 `ssh -tt` 连接远程，使内置「终端」页签透明接入。
@@ -226,6 +228,7 @@ Shell wrapper（`~/.dsh/remote-ssh/dsh-remote-shell[.cmd]`）检测工作区 `.r
 已知限制：
 
 - 集成终端（`ssh -tt`）与远端其它进程改动的文件依赖 TTL + 复验兜底，最多 **5 秒**陈旧；
+- **agent 的 `read` 仍读本地镜像**：2.4.14 起 `write`/`edit` 会同步到远端，但若文件在远端被其它人改动，agent 读到的是镜像里的旧内容（用 `remote_ssh_sync` 重新拉取镜像即可）；
 - `/sidebar/file` 下载池化路径有效上限约 **6.29MB**，更大文件自动退回一次性连接下载（可成功，多一次重连开销）；
 - 二进制内容伪装成文本扩展名时会多一次 base64 回退往返（结果正确）。
 

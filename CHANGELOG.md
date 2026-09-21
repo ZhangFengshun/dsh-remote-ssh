@@ -2,6 +2,19 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.14] — 远程工作区里 agent 的 `write`/`edit` 现在会同步到远端（issue #15）
+### 新增
+- **模型侧文件工具写回远端**（感谢 @Linhaojing 的桥接面分析与三条修法）：远程工作区会话里 agent 的 `write` / `edit` 走的是**进程内 `ctx.fs`**（宿主 base bundle 挂的是本地 `fs-sandbox`），不经过任何 HTTP 路由——因此此前只落**本地镜像**，用户在远端机器上找不到文件，只能人工 `remote_ssh_push`/`scp`；工具返回"已创建"而远端 `ls` 为空，容易被误判为失败。这与 #10（`fileReferences` 是进程内服务）同源不同面。
+  - **接法刻意保守**：包装 `ctx.fs` 的 `writeText` / `editText`，**原方法照旧调用**——镜像内容、沙箱围栏（`sandboxPolicy`）、写意图（`createIfAbsent` / `replaceIfVersion`）、`signal` 全部原样透传，我们**不伪造 `FsTarget`、不改 `resolve()` 行为**，只读它的返回值（`FsWriteOutcome.after` / `FsEditOutcome.after` 即写入后的完整内容）；
+  - 成功后把**这一份内容定向推回远端对应的那个文件**（沿用既有 `remoteWriteFile` 的 base64 写入 + 缓存失效），写前自动 `mkdir -p` 远端父目录；**不调用整镜像 push**（那会用旧镜像覆盖远端其它文件——正是报告者担心的点）；
+  - **等待同步完成再返回**：工具说"写好了"时远端已有该文件，消除"说写了却找不到"的歧义；
+  - **失败只告警，绝不让写操作变失败**：本地写入已成功，推送失败打一条 warn（提示可用 `remote_ssh_push` 补推）；
+  - 路径识别用「向上找最近的 `.remote-ssh.json`」（有界 8 层），非远程工作区路径直接返回 → **本地会话零影响**；软注入 `ctx.fs`（服务缺失/被替换时退回旧行为并打日志），清理时恢复原方法。
+- **文档补齐**（同 issue 的方案 1）：README「原理」与「缓存与一致性」写明模型侧文件工具的落点与 2.4.14 起的同步行为；新增一条已知限制——**agent 的 `read` 仍读本地镜像**（远端被他人改动时 agent 读到旧内容，需 `remote_ssh_sync` 刷新）。
+
+### 测试
+- 新增 `tests/fs-write-bridge.test.mjs`（**33 条断言**）：`installFsWriteBridge` 行为（原方法先调用、返回值透传、`expected`/`signal`/`sandboxPolicy` 原样透传、`target` 不被伪造、回调收到 `processPath` 规范路径与 `outcome.after`、原写入抛错时不回调、回调抛错不影响写入结果且只告警、无 `processPath` 时退回 `displayPath`、非法服务安全返回 null、恢复函数生效）、`findMirrorRoot` 真实文件系统测试（嵌套深层识别、非镜像路径、标记缺字段不误判、超 8 层有界）、以及接线断言（软注入、清理恢复、定向推送而非整镜像、`mkdir -p` 父目录）。
+
 ## [2.4.13] — `remote_ssh_push` / `remote_ssh_sync` 成功却报 `returned invalid output`（issue #14）
 ### 修复
 - **推送成功却被判为工具输出非法**（感谢 @Linhaojing 的根因定位与复现）：`sync` / `push` 共用的 output schema 把 `error` 声明为**必填**且 `additionalProperties: false`，而两条成功路径返回 `{ ok: true, mirrorPath }` / `{ ok: true, remotePath }` —— 成功时既缺 `error` 又带未声明字段，必然被 output 校验拒掉；**失败路径反而合法**，于是症状是「**只有成功会报错**」：模型看到 `Error: tool "remote_ssh_push" returned invalid output: missing required property "value.error"; "value.remotePath" is not a declared property`，但远端文件其实已经写好了，只能靠再跑一次 `ls`/`sha256sum` 确认，很容易误判成需要重试。而这条链路正是远程工作区里 agent `write`/`edit` 落回远端的唯一通道，成功信号不可信影响面不小。

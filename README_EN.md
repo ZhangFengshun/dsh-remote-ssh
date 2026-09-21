@@ -46,7 +46,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.13
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.14
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -215,6 +215,8 @@ The plugin never patches DSH sources or injects into the profile dependency tree
 
 The plugin registers 6 exact routes (`/sidebar/api/fs.tree`, `fs.read`, `fs.write`, `fs.search`, plus `fs.rename` and `fs.remove` added by better-sidebar 0.19) that intercept better-sidebar's prefix route. When the session cwd contains `.remote-ssh.json`, requests go through SSH; otherwise local fs. The client sees local mirror paths — the Host transparently translates them to remote paths.
 
+**The model-side file tools (the agent's `write`/`edit`) use the in-process `ctx.fs`** (the host base bundle mounts the local `fs-sandbox`), never an HTTP route — so up to 2.4.13 they only landed in the **local mirror**, leaving users unable to find the file on the remote machine without a manual `remote_ssh_push`. Since 2.4.14 the plugin wraps `ctx.fs`'s `writeText`/`editText`: the **original write runs unchanged** (mirror content, sandbox fence and write-intent semantics intact), and on success the same content is pushed to **that one remote file** (not a whole-mirror tar, which could overwrite unrelated remote files), creating the remote parent directory first. A failed push only logs a warning — the local write already succeeded, so the bridge never turns a write into a failure; if the service cannot be wrapped, the old behaviour returns with a log line.
+
 Remote reads use a **single-roundtrip merged read**: one pooled command returns the `size/mtime` frame plus the file content (text extensions prefer raw transfer with byte-length + U+FFFD validation and automatic base64 fallback — results are byte-identical), combined with host-side result caching and change invalidation (see below).
 
 A shell wrapper (`~/.dsh/remote-ssh/dsh-remote-shell[.cmd]`) detects the workspace's `.remote-ssh.json` and auto-launches `ssh -tt`, making the built-in **Terminal** tab transparently connect to remote.
@@ -226,6 +228,7 @@ Remote reads and directory listings are cached host-side (read LRU 32 + listing 
 Known limitations:
 
 - Files changed from the integrated terminal (`ssh -tt`) or by other remote processes rely on TTL + revalidation and may be stale for up to **5 seconds**;
+- **The agent's `read` still reads the local mirror**: since 2.4.14 `write`/`edit` are mirrored to the remote, but if someone else changes the file remotely the agent reads the older mirror copy (run `remote_ssh_sync` to refresh the mirror);
 - The pooled `/sidebar/file` download path has an effective limit of ≈**6.29MB**; larger files automatically fall back to a one-shot connection download (succeeds, with one extra reconnect);
 - Binary content masquerading with a text extension costs one extra base64 fallback round-trip (results are still correct).
 
