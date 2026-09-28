@@ -117,6 +117,14 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
   `tests/manifest-compat.test.mjs` 用内置严格比较器守住这一点（`DSH_RUNTIME_VERSION` 可覆盖目标版本）。
   另外：运行时不再提供的客户端包要从 `dsh.client.inject` 移除（0.2.0-rc.1 起没有
   `@deepseek-ai/dsh-client-runtime`），否则客户端半边会去解析不存在的包。
+- **🖥 desktop profile 只能由应用内插件管理器改（2026-09-28 起）**：`dsh plugin --profile desktop …`
+  会被无条件拒绝（`profile "desktop" is managed exclusively by the Electron application`，
+  `rejectElectronProfile` 无开关）。想手工升级只会遇到两个护栏：① profile 的 node_modules 由**特定
+  版本**的 pnpm 建（`.modules.yaml` 里记 `packageManager`/`storeDir` 是 `store\v11`），换版本就
+  `ERR_PNPM_UNEXPECTED_STORE`；② harness 给 pnpm 传了 `minimumReleaseAge` 供应链策略，**刚发布的版本
+  在时限内会被拒**（`ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`）。所以：让用户去应用的插件管理器更新，
+  不要手工 pnpm / 直接改 package.json。用户自己装的版本若被兼容性门挡住，可让他点"接受风险"豁免（前提是
+  该版本代码本身已适配，例如 2.4.15 与 2.4.16 的代码相同、只差 peer 声明）。
 - **🔎 用运行中的宿主做接口对拍**：`cordis_inspect_list` → host `Service.listService`（不带参数出目录，
   带 `{service}` 出该服务契约）、`Config.listConfigs`（`{name: <包名>}` 查自己的 entry；`{entry}` 取投影
   schema）、`Tool.listTools`（插件是否真的注册了工具）、client `Slots.listSubTree`（客户端槽位是否存在）。
