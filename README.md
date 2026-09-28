@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.14
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.15
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -182,6 +182,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 组件 | 版本 | 状态 |
 | --- | --- | --- |
 | DSH | 0.1.5-rc.1（DSH Desktop v2.0.9） | ✅ 主机服务 / settings / tools / slot / 上传下载拦截全部咬合 |
+| DSH | **0.1.7-rc.2**（DSH Desktop v2.0.15） | ✅ 2.4.15 起适配：`settings` 新 API（`configure`/`describe`/`update`，数据存于本插件 entry 的 Config，字段标 `.volatile()`）+ **旧 `settings.yaml` 一次性迁移**（连接/工作区 ID 与 mirrorPath 全保留，无需重建）；侧边栏终端改由宿主原生 `terminal-controller` 管理，patch 已同时覆盖它与 `better-sidebar` |
 | DSH | 0.1.2-rc.1 稳定线 | ✅（插件 2.3.x 时代基线） |
 | dsh-better-sidebar | 0.15.0 – 0.18.0 | ✅ `fs.tree`/`fs.read`/`fs.write` + `fs.search`（`{ matches: cwd 相对 '/'-分隔路径, truncated }` 契约，2.4.11 起；此前只回 `entries` 会让「按文件名搜索」崩掉整块页签） |
 | dsh-better-sidebar | 0.19.x | ⚠️ 插件侧已适配 6 端点（含 `fs.rename`/`fs.remove`）；但 0.19.0/0.19.1 自身在 DSH Desktop 上主机半边无法加载，需等上游修复（见[安装](#安装)的警告） |

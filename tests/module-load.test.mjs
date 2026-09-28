@@ -10,7 +10,7 @@
 // 用 profile 里真实的 schemastery（我们的运行时依赖），然后 import() —— 与 DSH 的加载路径一致。
 import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync, existsSync, readFileSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
@@ -21,43 +21,58 @@ const src = readFileSync(target, 'utf8')
 let pass = 0, fail = 0
 const check = (cond, label) => { if (cond) { pass++; console.log('  ✓ ' + label) } else { fail++; console.log('  ✗ FAIL: ' + label) } }
 
-/** 找出 profile 里真实的 schemastery（我们的运行时依赖）。 */
-function findSchemastery() {
+/** 找 profile / app / 仓库里的真实依赖包目录。 */
+function findDependency(name) {
   const candidates = [
-    process.env.DSH_PROFILE_DIR ? join(process.env.DSH_PROFILE_DIR, 'node_modules', 'schemastery') : undefined,
-    join(process.env.USERPROFILE || '', '.dsh', 'profiles', 'desktop', 'node_modules', 'schemastery'),
-    join(root, 'node_modules', 'schemastery'),
+    process.env.DSH_PROFILE_DIR ? join(process.env.DSH_PROFILE_DIR, 'node_modules', name) : undefined,
+    join(process.env.USERPROFILE || '', '.dsh', 'profiles', 'desktop', 'node_modules', name),
+    'E:\\Program Files\\DSH Desktop\\resources\\app\\node_modules',
+    join(root, 'node_modules', name),
   ].filter(Boolean)
-  return candidates.find((p) => existsSync(join(p, 'package.json')))
+  for (const candidate of candidates) {
+    const pkgDir = candidate.endsWith('node_modules') ? join(candidate, name) : candidate
+    if (existsSync(join(pkgDir, 'package.json'))) return pkgDir
+  }
+  return undefined
+}
+
+/** 源码里的裸模块 specifier（跳过 node: 内置），用于自动准备测试环境的依赖。 */
+function bareImports(text) {
+  const found = new Set()
+  const re = /(?:^|\n)\s*import\s[^\n]*?from\s+["']([^"']+)["']/g
+  let m
+  while ((m = re.exec(text)) !== null) {
+    const spec = m[1]
+    if (!spec.startsWith('node:') && !spec.startsWith('.') && !spec.startsWith('/')) found.add(spec)
+  }
+  return [...found]
 }
 
 console.log('A · 模块加载（真实 import）')
 {
   const dir = mkdtempSync(join(tmpdir(), 'rssh-load-'))
   try {
+    // DSH 运行时以「代理模块」提供这些包（磁盘上没有真实实现）→ 打桩
+    const stubbed = ['@deepseek-ai/dsh-tools']
     mkdirSync(join(dir, 'node_modules', '@deepseek-ai', 'dsh-tools'), { recursive: true })
     writeFileSync(join(dir, 'node_modules', '@deepseek-ai', 'dsh-tools', 'package.json'),
       JSON.stringify({ name: '@deepseek-ai/dsh-tools', version: '0.0.0', type: 'module', main: 'index.js', exports: { '.': './index.js' } }))
     writeFileSync(join(dir, 'node_modules', '@deepseek-ai', 'dsh-tools', 'index.js'),
       'export function defineTool(def) { return def }\nexport default { defineTool }\n')
 
-    const sm = findSchemastery()
-    if (sm) {
-      // 用 junction 指向真实包：它的传递依赖（cosmokit 等）会沿真实路径的父级 node_modules 解析到
-      mkdirSync(join(dir, 'node_modules'), { recursive: true })
-      try {
-        symlinkSync(sm, join(dir, 'node_modules', 'schemastery'), 'junction')
-      } catch (e) {
-        // 退路：整目录复制（含传递依赖可能失败，但至少覆盖无依赖场景）
-        const smDir = join(dir, 'node_modules', 'schemastery')
-        mkdirSync(join(smDir, 'lib'), { recursive: true })
-        copyFileSync(join(sm, 'package.json'), join(smDir, 'package.json'))
-        for (const f of ['index.cjs', 'index.mjs']) {
-          if (existsSync(join(sm, 'lib', f))) copyFileSync(join(sm, 'lib', f), join(smDir, 'lib', f))
-        }
-      }
+    // 其余裸依赖（@deepseek-ai/schemastery、yaml 等）从真实环境 junction 过来，
+    // 这样「新增运行时依赖忘了同步测试环境」不会再伪装成加载失败。
+    const linked = []
+    const missing = []
+    for (const spec of bareImports(src)) {
+      if (stubbed.includes(spec)) continue
+      const pkgDir = findDependency(spec)
+      if (!pkgDir) { missing.push(spec); continue }
+      const target = join(dir, 'node_modules', spec)
+      mkdirSync(dirname(target), { recursive: true })
+      try { symlinkSync(pkgDir, target, 'junction'); linked.push(spec) } catch (e) { missing.push(spec) }
     }
-    check(!!sm, `找到真实 schemastery（${sm || '未找到，用最小桩'}）`)
+    check(missing.length === 0, `源码里的运行时依赖都能解析（已链接 ${linked.join(', ') || '无'}${missing.length ? '；缺失 ' + missing.join(', ') : ''}）`)
 
     copyFileSync(target, join(dir, 'index.js'))
     let mod

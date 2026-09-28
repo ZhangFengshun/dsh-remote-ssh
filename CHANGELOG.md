@@ -2,6 +2,19 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.15] — 适配 DSH 0.1.7-rc.2：settings 新 API + 旧数据迁移 + 原生终端（issue #16 / #17）
+### 修复
+- **连接与工作区不再变空列表（issue #16）**：DSH 0.1.7-rc.2 的 `settings` 服务移除了 `register(ns, schema)`，改为 `configure / describe / update / replace / mutate`；用户偏好存放于**本插件 loader 行的 Config**，命名空间是 **entry id**（我们的 bundle 里是 `remote-ssh`），而旧 settings 的 section 键是**包名** `dsh-remote-ssh` —— 因此升级后旧数据既读不到、也不会被自动迁移。现在：
+  - **双版本兼容**：按能力探测分支——新版走 `describe({redactSecrets:true})` 按 entry id 读、`update(entryId, patch, revision)` 写（带 revision 防并发覆盖）、`configure({auto:false})` 注册页面策略；旧版（≤0.1.6，含 0.1.5-rc.x）保留 `register + scope.get()/update()`；两者都不可用时退回 `apply(ctx, config)` 的值（只读并打日志）。
+  - **Config 字段必须 `.volatile()`**：`Config` 改为由 `PrefsSchema` 派生并逐字段标 `.volatile()` —— 只有 DSH 分支的 `@deepseek-ai/schemastery` 实现该标记（公共 `schemastery` 没有），没有它新版 Loader 的 volatile-commit 路径不会提交，写入会"报成功但值不变"。依赖相应从 `schemastery` 换成 `@deepseek-ai/schemastery`。
+  - **一次性迁移旧数据**：`ctx.loader.await()` 之后读 `$DSH_HOME/settings.yaml.imported`（退 `settings.yaml`）里 `dsh-remote-ssh` section 的 `profiles` / `workspaces`，**仅在用户层为空时**导入（绝不覆盖升级后的设置），把原连接 ID、工作区 ID、mirrorPath 全部还原——**用户不需要重建任何连接或工作区**。新增 `yaml` 依赖用于解析退役文档。
+- **远程工作区不再静默打开本地终端（issue #17）**：DSH 0.1.7-rc.2 起侧边栏终端由宿主原生 `terminal-controller`（`@deepseek-ai/dsh-api-terminal-controller`）管理，其 `Config.shell = { path, name, args }`，**不再读** `better-sidebar.config.shell`。`cordis.patch.yml` 现在**同时**把 wrapper 交给两个入口（`terminal-controller` 与 `better-sidebar`，后者供旧侧边栏版本），路径按平台动态解析；旧版 DSH 没有该 entry 时 patch 目标不存在、被忽略（无害）。wrapper 本身不变：远程工作区（cwd 含 `.remote-ssh.json` 且 keyPath 非空）→ `ssh -tt` 连远程；本地工作区 → 本地 shell。
+
+### 测试
+- 新增 `tests/settings-compat.test.mjs`（**43 条断言**）：`ownEntryId`（fiber 命中 / 同包名未禁用回退 / 全禁用 → undefined / loader 抛错安全）、旧 section 解析（取字段、过滤未声明顶层键、YAML 损坏不抛、section 非对象、过滤后为空不写）、旧文件读取（`.imported` 优先、退回 `settings.yaml`、都不在 → undefined、空 home）、`prefsArray`（volatile 引用对象不是数组，退回 apply(config)）、新版外观（按 entry id 读、`redactSecrets`、`update` 带 revision 与只带被改字段、表单缺失回退、describe 抛错不炸）、迁移（用户层为空才导入、已有值不动、无 profile home / 无旧文件的分支）、以及接线与 schema 断言（volatile 派生、Config 定义顺序、双版本分支、`loader.await` 时机、两个新依赖）。
+- 新增 `tests/terminal-integration.test.mjs`（**23 条断言**）：解析 bundle patch 并**真实求值**两条 `!!js` 表达式（win32 / linux 各一组）——`terminal-controller` 必须得到 `{ path, name, args }` 且字段恰为这三个、两个入口指向同一 wrapper、Windows 用 `.cmd`；并与宿主 `terminal-controller` 的 Config schema 对拍（`shell` 是对象联合体、`path`/`name` 必填、`args` 为字符串数组）。
+- `tests/module-load.test.mjs` 改为**自动解析源码里的裸依赖**并 junction 到真实包（新增依赖不会再伪装成加载失败）。
+
 ## [2.4.14] — 远程工作区里 agent 的 `write`/`edit` 现在会同步到远端（issue #15）
 ### 新增
 - **模型侧文件工具写回远端**（感谢 @Linhaojing 的桥接面分析与三条修法）：远程工作区会话里 agent 的 `write` / `edit` 走的是**进程内 `ctx.fs`**（宿主 base bundle 挂的是本地 `fs-sandbox`），不经过任何 HTTP 路由——因此此前只落**本地镜像**，用户在远端机器上找不到文件，只能人工 `remote_ssh_push`/`scp`；工具返回"已创建"而远端 `ls` 为空，容易被误判为失败。这与 #10（`fileReferences` 是进程内服务）同源不同面。

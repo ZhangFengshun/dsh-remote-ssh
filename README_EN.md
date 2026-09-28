@@ -46,7 +46,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.14
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.15
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -182,6 +182,7 @@ All SSH commands default to a **120-second** timeout (issue #5): a hung remote c
 | Component | Version | Status |
 | --- | --- | --- |
 | DSH | 0.1.5-rc.1 (DSH Desktop v2.0.9) | ✅ host services / settings / tools / slots / upload & download interception all compatible |
+| DSH | **0.1.7-rc.2** (DSH Desktop v2.0.15) | ✅ since 2.4.15: the new `settings` API (`configure`/`describe`/`update`, data stored in this plugin's entry Config with `.volatile()` fields) plus a **one-time migration of the retired `settings.yaml`** (connection/workspace ids and mirrorPaths preserved — nothing to rebuild); the sidebar terminal is now owned by the host's native `terminal-controller`, and the bundle patch covers it as well as `better-sidebar` |
 | DSH | 0.1.2-rc.1 stable line | ✅ (the 2.3.x-era baseline) |
 | dsh-better-sidebar | 0.15.0 – 0.18.0 | ✅ `fs.tree`/`fs.read`/`fs.write` + `fs.search` (the `{ matches: cwd-relative '/'-separated paths, truncated }` contract, since 2.4.11; returning only `entries` used to crash the whole Files tab on search) |
 | dsh-better-sidebar | 0.19.x | ⚠️ this plugin already supports the 6-endpoint contract (incl. `fs.rename`/`fs.remove`); 0.19.0/0.19.1 themselves cannot load their host half on DSH Desktop until upstream fixes it (see the warning under [Installation](#installation)) |

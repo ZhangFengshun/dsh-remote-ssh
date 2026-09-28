@@ -20,3 +20,22 @@
         var dir = homedir + sep + '.dsh' + sep + 'remote-ssh';
         return isWin ? dir + sep + 'dsh-remote-shell.cmd' : dir + sep + 'dsh-remote-shell';
       })()
+# DSH 0.1.7-rc.2 起，侧边栏终端改由宿主原生的 `terminal-controller`
+# （@deepseek-ai/dsh-api-terminal-controller）管理，它只读自己的 `config.shell`
+# （{ path, name, args }），不再读 better-sidebar 的 shell 配置 —— 因此远程工作区
+# 会静默打开本地 shell。这里把**同一个 wrapper** 也交给原生终端。
+# 旧版 DSH 没有该 entry，patch 目标不存在时会被忽略（无害）。
+- id: terminal-controller
+  config:
+    shell: !!js |
+      (() => {
+        var homedir = process.env.USERPROFILE || process.env.HOME || process.env.HOMEDRIVE + process.env.HOMEPATH;
+        var isWin = process.platform === 'win32';
+        var sep = isWin ? '\\' : '/';
+        var dir = homedir + sep + '.dsh' + sep + 'remote-ssh';
+        return {
+          path: isWin ? dir + sep + 'dsh-remote-shell.cmd' : dir + sep + 'dsh-remote-shell',
+          name: 'Auto SSH / Local',
+          args: []
+        };
+      })()
