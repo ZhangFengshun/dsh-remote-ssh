@@ -38,7 +38,7 @@
 
 | 项 | 要求 |
 | --- | --- |
-| DSH | ≥ 0.1.5-rc.1（0.1.2 稳定线请用 v0.18.1 时代的插件版本） |
+| DSH | ≥ 0.1.5-rc.1，**含 0.2.0-rc.1**（最新官方线；0.1.2 稳定线请用 v0.18.1 时代的插件版本）。插件声明的 peer 范围显式列出每条已验证版本线，因此新版 harness 的兼容性门（见[安装](#安装)）不会拦住它 |
 | dsh-better-sidebar | ≥ 0.15（本插件依赖其 `/sidebar/api/fs.*` 文件 API） |
 | 本机 SSH 客户端 | Windows：系统自带 OpenSSH（`%SystemRoot%\System32\OpenSSH\ssh.exe`）；Linux/macOS：openssh-client |
 | 远程主机 | 任意标准 sshd（超算 / 服务器 / 跳板机均可） |
@@ -46,10 +46,12 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.15
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.16
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
+
+> **DSH 0.2.0-rc.1 起：装不上 / 插件列表里不出现？** 新版 harness 会按插件自己声明的 **DSH peer 版本范围**判定兼容性，范围覆盖不到当前运行时版本时会**拒绝安装/激活**（提示 `Plugin … is incompatible with dsh <版本>`），并在插件管理器里给你一个「接受风险」的逐版本豁免。2.4.16 起本插件的 peer 范围已显式列出所有已验证版本线（`^0.1.0-rc.6 || ^0.1.5-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1`），**不需要**任何豁免即可安装。若你用的是更早的插件版本，请升级而不是点"接受风险"。（判定是严格 semver：预发布运行时只被"版本线显式列出"的范围覆盖 —— 这也是为什么范围里要逐条列 `0.1.5-rc.1` 这类版本。）
 
 卸载：
 
@@ -182,7 +184,9 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 组件 | 版本 | 状态 |
 | --- | --- | --- |
 | DSH | 0.1.5-rc.1（DSH Desktop v2.0.9） | ✅ 主机服务 / settings / tools / slot / 上传下载拦截全部咬合 |
+| DSH | **0.2.0-rc.1**（DeepSeek Harness 桌面端 nightly，2026-09-28） | ✅ 2.4.16 起适配并真机验证：peer 范围显式列出该版本线（否则 harness 会**拒绝安装/激活**）；`settings` 新 API 与旧数据迁移继续有效（实测升级后首次启动即恢复全部连接与工作区）；终端 patch 仍命中 `terminal-controller`。客户端注入清单同步移除运行时已不提供的 `dsh-client-runtime` |
 | DSH | **0.1.7-rc.2**（DSH Desktop v2.0.15） | ✅ 2.4.15 起适配：`settings` 新 API（`configure`/`describe`/`update`，数据存于本插件 entry 的 Config，字段标 `.volatile()`）+ **旧 `settings.yaml` 一次性迁移**（连接/工作区 ID 与 mirrorPath 全保留，无需重建）；侧边栏终端改由宿主原生 `terminal-controller` 管理，patch 已同时覆盖它与 `better-sidebar` |
+| DSH | 0.1.5-rc.1 / 0.1.0-rc.6 线 | ✅ 主机服务 / settings / tools / slot / 上传下载拦截全部咬合（peer 范围继续覆盖） |
 | DSH | 0.1.2-rc.1 稳定线 | ✅（插件 2.3.x 时代基线） |
 | dsh-better-sidebar | 0.15.0 – 0.18.0 | ✅ `fs.tree`/`fs.read`/`fs.write` + `fs.search`（`{ matches: cwd 相对 '/'-分隔路径, truncated }` 契约，2.4.11 起；此前只回 `entries` 会让「按文件名搜索」崩掉整块页签） |
 | dsh-better-sidebar | 0.19.x | ⚠️ 插件侧已适配 6 端点（含 `fs.rename`/`fs.remove`）；但 0.19.0/0.19.1 自身在 DSH Desktop 上主机半边无法加载，需等上游修复（见[安装](#安装)的警告） |

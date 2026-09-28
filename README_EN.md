@@ -38,7 +38,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 
 | Item | Requirement |
 | --- | --- |
-| DSH | ≥ 0.1.5-rc.1 (on the 0.1.2 stable line, use the v0.18.1-era plugin release) |
+| DSH | ≥ 0.1.5-rc.1, **0.2.0-rc.1 included** (the current official line; on the 0.1.2 stable line, use the v0.18.1-era plugin release). The declared peer range names every verified line explicitly, so the new harness compatibility gate (see [Installation](#installation)) does not block it |
 | dsh-better-sidebar | ≥ 0.15 (this plugin uses its `/sidebar/api/fs.*` file API) |
 | Local SSH client | Windows: built-in OpenSSH (`%SystemRoot%\System32\OpenSSH\ssh.exe`); Linux/macOS: openssh-client |
 | Remote host | Any standard sshd (HPC / server / bastion) |
@@ -46,10 +46,12 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.15
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.16
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
+
+> **On DSH 0.2.0-rc.1+, does the install get refused or the plugin stay invisible?** The new harness judges compatibility from the **DSH peer version ranges a plugin declares**: if the range does not cover the running version, installation/activation is **rejected** (`Plugin … is incompatible with dsh <version>`) and the plugin manager offers a per-version "accept the risk" exemption instead. Since 2.4.16 this plugin lists every verified line explicitly (`^0.1.0-rc.6 || ^0.1.5-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1`), so **no exemption is needed**. If you are on an older plugin version, upgrade rather than clicking "accept the risk". (The check is strict semver: a prerelease runtime is only covered by a range that names that line explicitly — which is why lines like `0.1.5-rc.1` are listed one by one.)
 
 Uninstall:
 
@@ -182,7 +184,9 @@ All SSH commands default to a **120-second** timeout (issue #5): a hung remote c
 | Component | Version | Status |
 | --- | --- | --- |
 | DSH | 0.1.5-rc.1 (DSH Desktop v2.0.9) | ✅ host services / settings / tools / slots / upload & download interception all compatible |
+| DSH | **0.2.0-rc.1** (DeepSeek Harness desktop nightly, 2026-09-28) | ✅ adapted and verified on a real runtime since 2.4.16: the peer range names that line explicitly (otherwise the harness **refuses to install/activate** the plugin); the new `settings` API and the legacy-data migration keep working (a fresh profile restores every connection and workspace on its first boot); the terminal patch still lands on `terminal-controller`. The client inject list drops `dsh-client-runtime`, which the runtime no longer ships |
 | DSH | **0.1.7-rc.2** (DSH Desktop v2.0.15) | ✅ since 2.4.15: the new `settings` API (`configure`/`describe`/`update`, data stored in this plugin's entry Config with `.volatile()` fields) plus a **one-time migration of the retired `settings.yaml`** (connection/workspace ids and mirrorPaths preserved — nothing to rebuild); the sidebar terminal is now owned by the host's native `terminal-controller`, and the bundle patch covers it as well as `better-sidebar` |
+| DSH | 0.1.5-rc.1 / 0.1.0-rc.6 lines | ✅ host services / settings / tools / slots / upload & download interception all compatible (still covered by the peer range) |
 | DSH | 0.1.2-rc.1 stable line | ✅ (the 2.3.x-era baseline) |
 | dsh-better-sidebar | 0.15.0 – 0.18.0 | ✅ `fs.tree`/`fs.read`/`fs.write` + `fs.search` (the `{ matches: cwd-relative '/'-separated paths, truncated }` contract, since 2.4.11; returning only `entries` used to crash the whole Files tab on search) |
 | dsh-better-sidebar | 0.19.x | ⚠️ this plugin already supports the 6-endpoint contract (incl. `fs.rename`/`fs.remove`); 0.19.0/0.19.1 themselves cannot load their host half on DSH Desktop until upstream fixes it (see the warning under [Installation](#installation)) |

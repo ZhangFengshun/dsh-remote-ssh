@@ -2,6 +2,18 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.16] — 适配 DSH 0.2.0-rc.1：通过 harness 的插件兼容性门（peer 版本范围）
+### 修复
+- **插件不再被新版 harness 拒绝安装/激活**：DSH 0.2.0-rc.1（DeepSeek Harness 桌面端 nightly，2026-09-28 更新）的插件管理器会用**插件自己声明的 DSH peer 版本范围**判定兼容性；范围覆盖不到当前运行时版本时，`dsh plugin add` 直接**拒绝**（`Plugin @zhangfengshun/dsh-remote-ssh@2.4.15 is incompatible with dsh 0.2.0-rc.1: peerDependencies … compatible with this dsh runtime`），已装的捆绑包也不会激活（宿主里看不到本插件的任何 entry / 工具），只能靠 `dsh plugin allow-version … --accept-risk` 逐版本豁免（官方警告可能崩溃、丢数据）。2.4.15 只声明 `^0.1.0-rc.6` → 在 0.2.0-rc.1 上被整条拦下。现在三条 DSH peer（`dsh-tools` / `dsh-client-locale` / `dsh-client-ui-primitives`）都显式列出**每条已验证版本线**：`^0.1.0-rc.6 || ^0.1.5-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1`，**无需任何豁免**即可安装与激活。
+  - 之所以要逐条列：判定用**严格 npm semver** —— 预发布版本只被"元组相同且自身带预发布"的比较器接受，所以 `^0.1.0-rc.6` 既覆盖不到 `0.1.5-rc.1`/`0.1.7-rc.2`，也覆盖不到 `0.2.0-rc.1`（`dsh-cron` 用同样的逐条列法）。
+- **客户端注入清单去掉运行时已不提供的包**：`@deepseek-ai/dsh-client-runtime` 自 0.2.0-rc.1 起不再随运行时提供（本插件代码也从未使用它，客户端半边只 `require` `react` 与 `@deepseek-ai/dsh-client-ui-primitives`），从 `dsh.client.inject` 移除，避免客户端半边去解析不存在的包。
+### 验证（真机，DSH 0.2.0-rc.1）
+- 把官方 **0.2.0-rc.1** CLI 装到临时目录，用 shipped 的 `web` 模板建一次性 profile：修复前 `dsh plugin add` **被拒**（原文见上）；修复后**安装被接受**并进入 bundles。
+- 以该 CLI 启动实例（备用端口，不打扰正在使用的桌面会话）：插件**正常挂载**（`/remote-ssh/api/listProfiles` 返回 200）；`settings` 新 API 读取正常（形状探针：`form=true ns=remote-ssh valueProfilesArray=true`）；**升级后首次启动**即从旧 `settings.yaml` 恢复 **2 条连接 + 2 个工作区**（原 id / host / port / keyPath / profileId / title 全对）；`--dump-config` 确认 `terminal-controller` 仍拿到本插件的 wrapper（`patchId` 命中，0.2.0-rc.1 的 entry 以 `include:` 前缀组合不影响 patch 目标）。
+- 与运行中的宿主的接口目录逐项对拍：`webServer` / `fs.writeText`+`editText` / `fileReferences` / `tools` / `subprocess` / `workspaceRegistry` / `sessions` / `profileContext` / `settings` 全部仍在；`ctx.webRuntime`（信任围栏的信任源）**已被移除**，软注入下自动退回 loopback-only（与 2.4.9 行为一致；桌面端本身以 `networkExposure: loopback` 运行，功能无损失）。客户端槽位 `sidebar.workspaces.directoryFlow` / `conversation.hero.workspace.directoryFlow` / `settings.section` 等仍然存在。
+### 测试
+- 新增 `tests/manifest-compat.test.mjs`（**43 条断言**）：内置**严格 npm semver** 比较器（含回归点自检：`^0.1.0-rc.6` 必须**不**覆盖 `0.2.0-rc.1`），断言每个 DSH peer 覆盖**全部已验证版本线**（0.1.0-rc.6 / 0.1.5-rc.1 / 0.1.7-rc.2 / 0.2.0-rc.1）与当前官方最新、且**不越界**声明未验证的线（0.3 / 1.x）；`cordis` 范围覆盖运行时实际版本；`dsh.bundle.patch` 指向的文件存在；`dsh.client.inject` 含客户端半边真正引用的包、且不含已移除的 `dsh-client-runtime`。官方再开新版本线时这条测试会失败，提醒扩范围而不是让用户点"接受风险"。
+
 ## [2.4.15] — 适配 DSH 0.1.7-rc.2：settings 新 API + 旧数据迁移 + 原生终端（issue #16 / #17）
 ### 修复
 - **连接与工作区不再变空列表（issue #16）**：DSH 0.1.7-rc.2 的 `settings` 服务移除了 `register(ns, schema)`，改为 `configure / describe / update / replace / mutate`；用户偏好存放于**本插件 loader 行的 Config**，命名空间是 **entry id**（我们的 bundle 里是 `remote-ssh`），而旧 settings 的 section 键是**包名** `dsh-remote-ssh` —— 因此升级后旧数据既读不到、也不会被自动迁移。现在：
