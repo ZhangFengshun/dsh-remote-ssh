@@ -107,6 +107,29 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
 
 ## 5. 维护备忘
 
+- **🧩 DSH 0.1.7-rc.2 起的 settings 模型（2026-09-28 适配，issue #16）**：`settings` 服务
+  **没有** `register(ns, schema)`，改为 `configure / describe / update / replace / mutate`；
+  用户偏好存放在**本插件 loader 行的 Config**（命名空间 = **entry id**，我们 bundle 里是
+  `remote-ssh`；而旧 settings 的 section 键是**包名** `dsh-remote-ssh` —— 这导致旧数据不会自动迁移）。
+  三条硬约束：
+  1. Config 字段必须 `.volatile()`，且**必须用 `@deepseek-ai/schemastery`**（公共 `schemastery`
+     没有该实现 → Loader 的 volatile-commit 路径不提交 → 写入"报成功但值不变"）；
+  2. 读：`describe({ redactSecrets: true }).find(d => d.ns === entryId).value`（实测 value 里是
+     **已解析的普通数组**）；`apply(ctx, config)` 里同名字段是**带 `.get()` 的引用对象**，两者都要兼容；
+  3. 写：`settings.update(entryId, patch, revision)`（revision 取自同一次 describe）。
+  旧数据迁移：读 `$DSH_HOME/settings.yaml.imported`（退 `settings.yaml`）里旧 section，
+  **仅当该 entry 用户层为空**时 `update` 导入；并把导入值放内存兜底，让升级后**第一次启动**就能看到。
+- **🧪 兼容性验证配方（不打扰用户正在用的会话）**：从 shipped 模板建一次性 profile
+  （复制 `profiles/web` 的 `package.json`/`cordis.yml`/`cordis.patch.yml`/`pnpm-workspace.yaml`），
+  `dsh plugin --profile <one-shot> add file:<tgz>`，然后
+  `$env:DSH_REMOTE_SSH_DEBUG_SHAPE='1'; dsh --profile <one-shot> --port 3199 --no-open`（后台跑），
+  再 curl 插件 API 验证：`POST http://127.0.0.1:3199/remote-ssh/api/listProfiles`
+  带 `x-requested-with: XMLHttpRequest`。**注意响应是 `{ok, value:{…}}` 信封**（曾因只读顶层
+  字段而误判"全空"）。验证完删掉该 profile 目录。
+- **🚫 禁用状态记在 `desktopDeselectedBundles`**：profile 的 `package.json` 里
+  `dsh.desktopDeselectedBundles` 列出的包即使仍在 dependencies 也不会挂载；
+  `dsh plugin add` **不会**替你清掉它 —— 恢复启用要把它从该数组移除、并确认包在
+  `dsh.profile.bundles` 里（顺序：`dsh-better-sidebar` 之前不要放本插件，本插件应在它之后）。
 - **🔒 公开产物里绝不出现真实主机 / 账号 / 项目 / 路径 / 镜像 ID（2026-09-20 用户明令）**：
   issue 回复、README、CHANGELOG、代码注释、测试夹具**一律用通用占位符**。曾把真实项目名、
   HPC 主机名、内网 IP、真实远程路径、镜像目录 ID 写进 issue 回复与仓库文档，属于信息泄露
