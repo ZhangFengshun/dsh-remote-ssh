@@ -2,6 +2,14 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.17] — 远程工作区「地球角标」的普适性：主题自适应 + 匹配容错 + 自检诊断
+### 修复
+- **浅色主题下地球角标不可见**（用户 2026-09-29 反馈：另一台电脑装同一版本后远程工作区文件夹图标上没有本机看到的地球角标）：该角标不是宿主原生能力 —— 壳层工作区行用的是固定图标原语（`IconFolderOpen16/Close16`），没有 per-workspace 图标 API，所以本插件在客户端半边按**工作区标题文本**定位那一行，再向行首文件夹 `svg` 追加一组"地球经纬线"（`data-rssh-globe`）。此前这组线的颜色**硬编码 `stroke="#ffffff"`**（同文件里的显示器图标却用 `currentColor`）→ **浅色主题下白线落在浅色侧边栏上几乎不可见**，看起来就像"没有角标"。现在改为取**文件夹图标自身的计算颜色**（`getComputedStyle().color`；透明或取不到时退回 `currentColor` 继承行文本色），浅色/深色主题都可见；几何与笔数（轮廓/经线/赤道/南北纬弧共 5 笔）完全不变。
+- **标题匹配更耐操**（同一问题的次要成因）：标题文本先做**空白归一化**（折叠换行/多空格，壳层渲染可能插入）再匹配；候选元素集加入 `[title]`/`[aria-label]` 并支持按属性值匹配（部分主题把标题放在属性上、行内文本另有装饰）；继续兼容自愈前遗留的「🌐 」前缀标题。
+- **新增角标自检与诊断**（便于在别的机器上一眼定位）：启动后 8s / 25s 各做一次自检，只在"**宿主返回了远程工作区、但工作区行上一个角标都没加上**"时打一条 warn（区分"宿主未返回工作区"的另一种情形并给出不同提示）；控制台暴露 `window.__dshRemoteSshGlobeStats(true)`，输出 `{ remoteWorkspaces, decoratedRows, globesInDom, watchedRows, titleKeys, titleSamples }` —— 可区分①客户端半边未加载（接口不存在）②宿主/设置未就绪（`remoteWorkspaces: 0`）③标题未匹配（`titleKeys` 与 `titleSamples` 对不上侧边栏文字）④壳层 DOM 结构变化（有工作区但 `globesInDom: 0`）。
+### 测试
+- 新增 `tests/workspace-globe.test.mjs`（**25 条断言**）：用**真实源码**截取角标相关函数 + 最小假 DOM，断言颜色主题自适应（传入计算色 / 取不到退回 `currentColor` / **代码里不再出现硬编码白色** / 5 笔几何与线宽不变）、计算色解析（深色、透明、抛错、空元素四种情形）、幂等应用与计数（React 还原后复检不会重复追加）、标题归一化（首尾空白、换行折叠、空值），以及匹配容错与诊断接线（归一化匹配、`title`/`aria-label` 容错、旧 🌐 前缀兼容、工作区计数、自检入口与告警文案、8s 延迟自检）。全套 **16 个文件 522 条断言**通过。
+
 ## [2.4.16] — 适配 DSH 0.2.0-rc.1：通过 harness 的插件兼容性门（peer 版本范围）
 ### 修复
 - **插件不再被新版 harness 拒绝安装/激活**：DSH 0.2.0-rc.1（DeepSeek Harness 桌面端 nightly，2026-09-28 更新）的插件管理器会用**插件自己声明的 DSH peer 版本范围**判定兼容性；范围覆盖不到当前运行时版本时，`dsh plugin add` 直接**拒绝**（`Plugin @zhangfengshun/dsh-remote-ssh@2.4.15 is incompatible with dsh 0.2.0-rc.1: peerDependencies … compatible with this dsh runtime`），已装的捆绑包也不会激活（宿主里看不到本插件的任何 entry / 工具），只能靠 `dsh plugin allow-version … --accept-risk` 逐版本豁免（官方警告可能崩溃、丢数据）。2.4.15 只声明 `^0.1.0-rc.6` → 在 0.2.0-rc.1 上被整条拦下。现在三条 DSH peer（`dsh-tools` / `dsh-client-locale` / `dsh-client-ui-primitives`）都显式列出**每条已验证版本线**：`^0.1.0-rc.6 || ^0.1.5-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1`，**无需任何豁免**即可安装与激活。

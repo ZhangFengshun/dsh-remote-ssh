@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.16
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.17
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -184,7 +184,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 组件 | 版本 | 状态 |
 | --- | --- | --- |
 | DSH | 0.1.5-rc.1（DSH Desktop v2.0.9） | ✅ 主机服务 / settings / tools / slot / 上传下载拦截全部咬合 |
-| DSH | **0.2.0-rc.1**（DeepSeek Harness 桌面端 nightly，2026-09-28） | ✅ 2.4.16 起适配并真机验证：peer 范围显式列出该版本线（否则 harness 会**拒绝安装/激活**）；`settings` 新 API 与旧数据迁移继续有效（实测升级后首次启动即恢复全部连接与工作区）；终端 patch 仍命中 `terminal-controller`。客户端注入清单同步移除运行时已不提供的 `dsh-client-runtime` |
+| DSH | **0.2.0-rc.1**（DeepSeek Harness 桌面端 nightly，2026-09-28） | ✅ 2.4.16 起适配并真机验证：peer 范围显式列出该版本线（否则 harness 会**拒绝安装/激活**）；`settings` 新 API 与旧数据迁移继续有效（实测升级后首次启动即恢复全部连接与工作区）；终端 patch 仍命中 `terminal-controller`。客户端注入清单同步移除运行时已不提供的 `dsh-client-runtime`；2.4.17 修好浅色主题下"工作区地球角标不可见"（颜色改为取图标自身计算色） |
 | DSH | **0.1.7-rc.2**（DSH Desktop v2.0.15） | ✅ 2.4.15 起适配：`settings` 新 API（`configure`/`describe`/`update`，数据存于本插件 entry 的 Config，字段标 `.volatile()`）+ **旧 `settings.yaml` 一次性迁移**（连接/工作区 ID 与 mirrorPath 全保留，无需重建）；侧边栏终端改由宿主原生 `terminal-controller` 管理，patch 已同时覆盖它与 `better-sidebar` |
 | DSH | 0.1.5-rc.1 / 0.1.0-rc.6 线 | ✅ 主机服务 / settings / tools / slot / 上传下载拦截全部咬合（peer 范围继续覆盖） |
 | DSH | 0.1.2-rc.1 稳定线 | ✅（插件 2.3.x 时代基线） |
@@ -212,6 +212,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 远程工作区里「按文件名搜索」一直转圈（大工作区） | 2.4.11 起已修复：改为浅层优先（`-maxdepth 3`，实测冷 0.68s / 热 0.11s）且**有命中就立即返回**（深挖转后台预热缓存，浅层零命中才同步等深挖 `-maxdepth 8`），遍历前剪噪声目录、去掉会阻塞短路的 `sort`，并加远端墙钟预算——到点返回**已收集的部分结果**并标记不完整。实测某大型远程项目工作区：旧实现 5 分钟零输出 → 现在 **0.96s 返回 43 条** |
 | 远程会话里 `@文件名` 没有候选，但单独输入 `@` 有 | 2.4.11 起已修复：模糊查询依赖索引，而索引首选 `git ls-files --cached --others`（`--others` 要遍历整棵工作树，巨型项目上跑不完 → 索引为空）。现在三级降级（完整 git 6s → 仅索引 git 3s → 有界 `find` `maxdepth 3` + 5s），并在索引未就绪时用有界 find 即时兜底（实测 0.65s），不再出现「全空」 |
 | 安装时提示 `minimumReleaseAge` 或「No matching version」（刚发布） | npm 供应链新鲜度策略，等 1–5 分钟后重试即可 |
+| **换一台电脑后，远程工作区的文件夹图标上没有本机看到的地球角标** | 该角标是客户端半边的 DOM 装饰（壳层工作区行只有固定文件夹原语，没有 per-workspace 图标 API），成立前提是：客户端半边已加载 → 宿主能返回远程工作区 → 行文本/属性与工作区标题匹配 → 壳层 DOM 结构一致 → **角标颜色在该主题下可见**。2.4.17 起：颜色改为取文件夹图标自身的计算色（浅色/深色都可见，此前硬编码白色在**浅色主题**下不可见）、匹配做空白归一化并兼容 `title`/`aria-label`、并加了自检。**排查**：在开发者工具 Console 执行 `window.__dshRemoteSshGlobeStats(true)` —— 返回 `undefined` 说明客户端半边没加载（升级插件后硬刷新页面）；`remoteWorkspaces: 0` 说明宿主没返回工作区（查插件版本与 harness 兼容性）；`remoteWorkspaces > 0` 而 `globesInDom: 0` 说明标题或 DOM 没匹配上（对照输出里的 `titleSamples` 与侧边栏实际显示文字）。 |
 | `remote_ssh_push` / `remote_ssh_sync` 明明推送成功却报 `returned invalid output` | 2.4.13 起已修复：这两个工具共用的 output schema 把 `error` 标成必填、成功路径又返回未声明的 `remotePath`/`mirrorPath`，于是**只有成功会报错**（失败路径反而合法）。现在 schema 声明两个路径字段、`error` 改为可选，成功路径也带 `error: ""`；全文件所有 output schema 的 `error` 一并改为可选 |
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |
