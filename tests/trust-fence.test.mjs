@@ -8,7 +8,7 @@
 // 三层：
 //   A. 纯 fence 语义（逐条对照 @deepseek-ai/dsh-client-connection 的 api-request-trust.ts）
 //   B. 组合行为：提取真实的 requestTrust，注入桩 trustedHosts 执行（verdict × 头校验）
-//   C. 接线：5 处调用点、软注入 webRuntime、按请求实时读取、文案区分原因
+//   C. 接线：6 处调用点、软注入 webRuntime、按请求实时读取、文案区分原因
 import { readFileSync } from 'node:fs'
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
@@ -134,13 +134,13 @@ console.log('B · 组合行为：真实 requestTrust + 桩 trustedHosts')
 console.log('C · 接线')
 {
   const callSites = (src.match(/= requestTrust\(req,/g) || []).length
-  check(callSites === 5, `5 处调用点全部改用 requestTrust（实际 ${callSites}）`)
+  check(callSites === 6, `6 处调用点全部改用 requestTrust（实际 ${callSites}；2.4.18 新增 open.external 路由）`)
   check(!/!isTrusted\(req/.test(src), '不再有旧 isTrusted(req) 布尔调用')
   check(/ctx\.inject\(\["webRuntime"\]/.test(src), '软注入 webRuntime（缺失时退回 loopback-only，插件仍可挂载）')
   check(/function trustedHostsNow\(\)[\s\S]{0,220}webRuntimeFace/.test(src), '按请求读取 webRuntime.trustedHosts')
   check(/webRuntimeFace && webRuntimeFace\.trustedHosts/.test(src), '实时读服务值（可被替换）')
   const denyCount = (src.match(/denyRequest\(res, \w+Trust\)/g) || []).length
-  check(denyCount === 4, `4 个 JSON 路由用 denyRequest 输出准确原因（实际 ${denyCount}）`)
+  check(denyCount === 5, `5 个 JSON 路由用 denyRequest 输出准确原因（实际 ${denyCount}）`)
   check(/res\.end\(trustErrorMessage\(fileTrust\)\)/.test(src), '/sidebar/file 的纯文本 403 也带准确原因')
   check(/code: reason === "header" \? "csrf" : "forbidden"/.test(src), '错误码保持兼容（缺头 csrf / 其余 forbidden）')
   check(/issue #12/.test(src), '代码注释记录了 issue 编号与同源说明')

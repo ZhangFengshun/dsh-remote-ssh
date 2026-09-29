@@ -117,6 +117,73 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
   `tests/manifest-compat.test.mjs` 用内置严格比较器守住这一点（`DSH_RUNTIME_VERSION` 可覆盖目标版本）。
   另外：运行时不再提供的客户端包要从 `dsh.client.inject` 移除（0.2.0-rc.1 起没有
   `@deepseek-ai/dsh-client-runtime`），否则客户端半边会去解析不存在的包。
+- **🧪 升级前沙箱（2026-09-29 起已自动化，替代手工配方）**：内核升版前先在工作区跑
+  `dsh-preupdate-sandbox\preupdate-sandbox.ps1`（默认取 `npm dist-tags.next`，并与桌面端
+  nightly feed 的版本号对照）。它在**独立 `DSH_HOME`**
+  （`C:\Users\Administrator\dsh-sandbox\<版本>\home`）里装候选内核 + 当前插件栈，逐个插件过
+  兼容门禁、再真实启动一次自检，产出 `reports\<版本>\report.md`（PASS/BLOCKED + 逐插件结论 +
+  准确的修复命令）。**豁免只写沙箱 profile，绝不写主 profile。**
+  `-Upgrade <pkg@ver>` 用来验证「升级插件」这条治本路径；`-AllowRisk` 用来验证「豁免之后能不能
+  起来」。**升级前还要跑 `-Stage grant`**：把目标内核需要的豁免写进主 profile 的
+  `compatibility.json`（= 应用里点「接受风险」，但不需要应用能启动，带备份且幂等）——
+  必须在升级**前**做，否则应用因门禁起不来时那个按钮也点不到（死锁）。该 JSON **必须 UTF-8
+  无 BOM**（应用是裸 `JSON.parse`），所以用 `lib\grant-exemption.mjs` 写而不要手写/`Out-File`。
+  实测结论（0.2.0-rc.2）：本插件 2.4.17 直接 OK（peer 已含 `^0.2.0-rc.1`）；
+  被挡的是 better-sidebar 0.22.1（升到 0.24.1 即可，其 peer 已是 `^0.2.0-rc.1`）、
+  agent-teams 0.1.21、skill-mcp-panel 2.1.2（peer 明确 `<0.2.0-0`）、dsh-cron 0.14.3。
+- **🚫 cordis 的 `inject` 没有 optional：第三方 bundle 提供的服务绝不要写进 `exports.inject`（2026-09-29，issue #18）**：
+  `Inject<M>` 只有两种形态 —— 字符串数组，或 `{ [K]: config|null }`（对象形态的 `null` 表示**拦截配置**，
+  **不是**"可选"，`Inject.resolve()` 只产出 `{serviceName: config|null}`）。`Fiber._refresh()`（cordis 4.0.4
+  `lib/index.js` L1317-1329）里 `for (const name of Object.keys(this.inject)) { if (!this._store[name]) { epoch = INACTIVE; break } }`
+  —— **任何一个 inject 键对应的服务没注册，整个 fiber 就永久 pending**。前端 boot 会把 pending 的条目列出来并抛错：
+  `web boot: N entr… did not activate` + `<插件>: pending (waiting for service: <服务>)`，桌面端还会弹「插件恢复」。
+  实例：客户端半边曾写 `exports.inject = ["betterSidebar", "slots", "locale"]`，而 `betterSidebar` 只由
+  `dsh-better-sidebar` 这个**可选** bundle 提供 → 没装它的用户整块前端起不来（宿主照旧只是打一条
+  `patch: entry "better-sidebar" not found` 的 warn，很容易看漏）。**正确写法是子 fiber 软注入**：
+  `ctx.inject(["betterSidebar"], (bsCtx) => { … bsCtx.effect(() => bs.registerTab(…)) })`（前端自身用
+  `e.inject(["uiRenderer"], o => {…})`，本插件宿主半边软注入 `webRuntime` 同理）；`exports.inject` 只留内核**一定**
+  提供的服务（`slots`/`locale`）。软注入回调在服务注册时执行，装与不装都安全。
+- **🔬 复现「插件让前端起不来」这类问题的验证配方（2026-09-29 建，A/B/C 三例已跑通）**：
+  ① 沙箱 profile 里按需增删依赖：`dsh plugin --profile sandbox remove <pkg>` / `add <pkg>@<ver>`（`dsh plugin`
+  就是 pnpm 直通，`remove` 可用）；② 启动 `node <core>\lib\bin.js --profile sandbox --port <端口> --no-open`，
+  从 stdout 抓 `dsh web: http://127.0.0.1:<端口>/?token=…`；③ **用无头 Chrome + CDP 读前端真实状态**，
+  不要用 `--dump-dom --virtual-time-budget`（页面有长连接/定时器时**会挂死**，脚本卡到超时）：
+  `chrome --headless=new --remote-debugging-port=9223 --user-data-dir=<空目录> about:blank`，再
+  `http://127.0.0.1:9223/json/version` 取 `webSocketDebuggerUrl`，Playwright MCP `browser_connect_roxy` 连上去后
+  `page.context().newCDPSession(page)` + `Network.setCacheDisabled` 再 `goto`（否则可能吃到旧 bundle），
+  然后 `page.evaluate` 读 `document.body.innerText`（失败时整屏就是 `Failed to load plugins` + 原因）与插件自己设的全局。
+  **判据别用 `window.__DSH_BOOT_READY__`：失败的场景里它同样是 `true`**（实测）；可靠判据是 ① DOM 里有没有
+  `did not activate` 错误屏 ② 插件自己在 `apply` 里设的全局（如 `__dshRemoteSshGlobeStats`）在不在
+  ③ 设置页里本插件的小节（如「远程连接」）出没出现。三例结论：已发布 2.4.17 + 无 better-sidebar = 整屏报错；
+  修复版 + 无 better-sidebar = 干净引导 + 设置页有「远程连接」；修复版 + better-sidebar 0.24.1 = 行为不变。
+- **🧷 better-sidebar 的 `fs.*` 契约是「逐端点」的：上游新增/改名端点必须同步注册 exact 路由（2026-09-29 实例，issue 现象＝「远程项目的侧边栏文件打开是本地目录」）**：
+  本插件靠注册 `/sidebar/api/fs.*` 的 **exact 路由**抢在 better-sidebar 的 `/sidebar/api` prefix 之前拦截，
+  **没注册的端点不会报错，而是静默回落到它自己的宿主实现（读本地 fs）** —— 表现就是"远程项目里看到本地目录"。
+  实例：`dsh-better-sidebar` **0.23+ 把文件树从「逐层 `fs.tree`」改成「一次 `fs.trees` 批量列举可见集」**
+  （工作区根 + 所有已展开目录，≤64 条；客户端按返回的 `level.path` 落缓存），0.24 又新增 `fs.mkdir`（新建目录）。
+  2.4.17 只注册了 `fs.tree` → 0.24 的整棵树绕过拦截、读本地镜像；新建目录也只建在本地镜像里。2.4.18 已适配 9 端点。
+  **同一个坑在「打开方式」上重演**：`open.external`（0.24 新增）宿主侧用本机打开器执行
+  （`explorer.exe /select,<路径>` / `rundll32 url.dll,FileProtocolHandler <url>`），客户端传的仍是**镜像路径** →
+  「在文件管理器中显示」打开本地镜像、「用 VS Code 打开」打开 `vscode://file/C:\…镜像…`。2.4.18 起拦截该端点，
+  远程工作区改开 `vscode://vscode-remote/ssh-remote+<别名><远端路径>`（`reveal` = 打开所在远端目录）。
+  别名必须**端口一致**才可用（非 22 端口 / 跳板机只能靠别名复用 ssh config 的 Port/User/IdentityFile/ProxyJump），
+  匹配逻辑是纯函数 `remoteEditorAuthority()`；拿不到别名就回退本机行为 + warn。**注意 `openWith.sshHost` 是反例**：
+  用户填了它，客户端会自行打开（宿主看不到），路径却仍是镜像路径 —— 文档里明确让人留空。
+  **每次升级 better-sidebar 后必做对拍（1 分钟）**：把它的宿主 handler 键集合与我们的注册数组逐项比对 ——
+  `node -e "const s=require('fs').readFileSync(process.argv[1],'utf8');console.log([...new Set([...s.matchAll(/\"(fs\.[a-zA-Z]+)\"/g)].map(m=>m[1]))].join(' '))" "<profile>\node_modules\dsh-better-sidebar\lib\index.js"`
+  （客户端真实调用侧看同一包的 `lib/client.js` 里的 `call(\"fs.*\")`；`fs.tree` 仍要保留 —— 旧版客户端与编辑器侧栏都在用）。
+  两条分支**都必须实现**：exact 路由会连本地会话一起抢占，只在远程分支处理会让本地工作区的该端点 404、反而弄坏原本正常的功能。
+  `fs.trees` 的响应形状必须对齐上游：`{ levels: [{ path(回显客户端传入的路径，客户端拿它当缓存键), entries, truncated, error? }] }`，
+  单层失败**不**让整批失败；远端批量列举用 `remoteListDirsBatch()`（`__DSH_LVL__` 标记分段，**一次 SSH 往返**列举 N 个目录，
+  别退化成 N 次 SSH），命中 `treeCache` 的层 0 RTT。
+  `open.external` 的宿主命令形状（三平台）与上游 `revealCommand`/`urlCommand` 逐字一致（纯函数 `openerCommand()`，
+  argv 数组、不经 shell、`detached`+`unref`）；自动化验证用 **`DSH_REMOTE_SSH_NO_LAUNCH=1`** 干跑，避免测试真的弹出
+  VS Code / 资源管理器窗口。远程打开要过三关：工作区归属（`matchRemoteWorkspace`，该端点**没有** sessionId/cwd）→
+  ssh 别名（端口一致才可用）→ `~` 展开（URL 不过 shell；`printf %s "$HOME"` + 10 分钟缓存），任何一关不过都**回退本机 + warn**。
+- **🧪 沙箱里装本地 tgz 做验证时：同版本 + 同路径不会重装（2026-09-29 踩到）**：`dsh plugin --profile sandbox add file:…tgz`
+  对**已装的同一版本号**直接跳过（pnpm 认为已满足），于是"验证通过"其实是旧包在跑 —— 必须先断言包内确实有新代码，
+  例如 `Select-String <profile>\node_modules\<pkg>\lib\index.js -Pattern '<新增函数名>'` 或把 tgz **换个文件名**（新的
+  `file:` spec）再装。煞尾：改动后重打包 → 换名 → 装 → 断言符号存在 → 再启动实例验证。
 - **🖥 desktop profile 只能由应用内插件管理器改（2026-09-28 起）**：`dsh plugin --profile desktop …`
   会被无条件拒绝（`profile "desktop" is managed exclusively by the Electron application`，
   `rejectElectronProfile` 无开关）。想手工升级只会遇到两个护栏：① profile 的 node_modules 由**特定

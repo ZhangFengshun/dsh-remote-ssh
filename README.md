@@ -39,17 +39,19 @@
 | 项 | 要求 |
 | --- | --- |
 | DSH | ≥ 0.1.5-rc.1，**含 0.2.0-rc.1**（最新官方线；0.1.2 稳定线请用 v0.18.1 时代的插件版本）。插件声明的 peer 范围显式列出每条已验证版本线，因此新版 harness 的兼容性门（见[安装](#安装)）不会拦住它 |
-| dsh-better-sidebar | ≥ 0.15（本插件依赖其 `/sidebar/api/fs.*` 文件 API） |
+| dsh-better-sidebar | ≥ 0.15（本插件依赖其 `/sidebar/api/` 文件 API 与 0.24 的 `open.external`「打开方式」端点；0.23 起文件树改为批量 `fs.trees` 并新增 `fs.mkdir`，**2.4.18 起已适配**）。**可以只装本插件**：2.4.18 起未安装它时不再卡住 web boot（见下方说明），但「文件」页签的远程读写与编辑器页签也随之不可用 |
 | 本机 SSH 客户端 | Windows：系统自带 OpenSSH（`%SystemRoot%\System32\OpenSSH\ssh.exe`）；Linux/macOS：openssh-client |
 | 远程主机 | 任意标准 sshd（超算 / 服务器 / 跳板机均可） |
 
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.17
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.18
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
+
+> **只装本插件、不装 `dsh-better-sidebar`（或它加载失败）会怎样？** 2.4.18 起可以正常启动：客户端只把内核服务（`slots`/`locale`）声明为硬依赖，better-sidebar 改走**子 fiber 软注入** —— 装了才注册远程文件编辑器页签，没装就静默降级。此时**能用**：设置页「远程连接」（SSH 连接与远程工作区）、模型工具（`remote_ssh_*`）、远程终端集成、`@` 远程文件补全；**不能用**：「文件」页签的远程读写与编辑器页签 —— 那套 `/sidebar/api/fs.*` 通道属于 better-sidebar（内核原生侧边栏走的是它自己的 `/api/*`，本插件不接管）。1.0.0 之前的旧版插件在这里会**永久 pending**，前端直接报 `web boot: 1 entry did not activate` / `pending (waiting for service: betterSidebar)`（issue [#18](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/18)）。另外 better-sidebar 缺席时宿主会打一条 `patch: entry "better-sidebar" not found` 的 warn —— `dsh-app-boot` 对缺席的 patch 目标无条件告警，**属正常，可忽略**。
 
 > **DSH 0.2.0-rc.1 起：装不上 / 插件列表里不出现？** 新版 harness 会按插件自己声明的 **DSH peer 版本范围**判定兼容性，范围覆盖不到当前运行时版本时会**拒绝安装/激活**（提示 `Plugin … is incompatible with dsh <版本>`），并在插件管理器里给你一个「接受风险」的逐版本豁免。2.4.16 起本插件的 peer 范围已显式列出所有已验证版本线（`^0.1.0-rc.6 || ^0.1.5-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1`），**不需要**任何豁免即可安装。若你用的是更早的插件版本，请升级而不是点"接受风险"。（判定是严格 semver：预发布运行时只被"版本线显式列出"的范围覆盖 —— 这也是为什么范围里要逐条列 `0.1.5-rc.1` 这类版本。）
 
@@ -190,6 +192,8 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | DSH | 0.1.2-rc.1 稳定线 | ✅（插件 2.3.x 时代基线） |
 | dsh-better-sidebar | 0.15.0 – 0.18.0 | ✅ `fs.tree`/`fs.read`/`fs.write` + `fs.search`（`{ matches: cwd 相对 '/'-分隔路径, truncated }` 契约，2.4.11 起；此前只回 `entries` 会让「按文件名搜索」崩掉整块页签） |
 | dsh-better-sidebar | 0.19.x | ⚠️ 插件侧已适配 6 端点（含 `fs.rename`/`fs.remove`）；但 0.19.0/0.19.1 自身在 DSH Desktop 上主机半边无法加载，需等上游修复（见[安装](#安装)的警告） |
+| dsh-better-sidebar | **0.20 – 0.24.x**（实测 0.24.1） | ✅ **2.4.18 起适配 9 端点**：0.23+ 的文件树改为**批量 `fs.trees`**（一次请求列举「可见集」，≤64 条）+ 新增 `fs.mkdir`，0.24 的「打开方式」走 `open.external`。此前只注册 `fs.tree` → 新版的列举**绕过拦截**落到 better-sidebar 自己的本地实现，远程项目里看到的就成了**本地镜像目录**；「打开方式」也只会打开本地镜像（见[故障排查](#故障排查)） |
+| dsh-better-sidebar | **未安装 / 加载失败** | ✅ **2.4.18 起可正常启动**（不再阻塞 `web boot`，见[安装](#安装)）：设置页「远程连接」、模型工具、远程终端、`@` 补全照常；⚠️ 「文件」页签的远程读写与编辑器页签不可用（`/sidebar/api/fs.*` 属于 better-sidebar；内核原生侧边栏走自己的 `/api/*`）。宿主会打一条 `patch: entry "better-sidebar" not found` 的 warn，属正常 |
 | 远程主机 sshd | 标准 OpenSSH（Linux / 超算 / Windows） | ✅ 密钥认证；密码认证需本机 `sshpass`（POSIX） |
 
 插件不修改 DSH 源码、不注入 profile 依赖树，全部能力经官方 `cordis.patch.yml` + profile 机制挂载。
@@ -201,6 +205,10 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 「测试连接」报 `Permission denied (publickey)` | ① 私钥**带口令**：插件以批处理模式运行（`BatchMode=yes`），无法交互输口令——先用 `ssh-add` 加载，或去掉密钥口令；② Windows host 且用户在 Administrators 组时，公钥须写入 `C:\ProgramData\ssh\administrators_authorized_keys`；③ 用户名的写法（`user` / `.\user` / `user@domain`）要与手动连接一致 |
 | 从 git-bash 启动 `dsh web` 后密钥认证失败 | 2.3.9 起已修复：Windows 下 ssh 解析固定为系统 OpenSSH 绝对路径（此前会误用 Git 自带的 MSYS2 ssh） |
 | 侧边栏文件页签显示「这类内容还没有可用的查看方式。」 | `dsh-better-sidebar` 主机半边未加载：0.18.1 / 0.19.0 / 0.19.1 在 DSH Desktop 上会因 `SessionLogOffset` 运行时导入失败——降到 0.18.0 或使用修复版（上游 PR [#641](https://github.com/omdsh-dev/DSH-better-sidebar/pull/641)） |
+| 前端整屏报 `Failed to load plugins` / `web boot: 1 entry did not activate` / `@zhangfengshun/dsh-remote-ssh: pending (waiting for service: betterSidebar)`，Desktop 还提示「插件恢复」 | ≤ 2.4.17 已知问题（issue [#18](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/18)）：本插件当时把 better-sidebar 的客户端服务声明为**硬依赖**，未安装它的用户前端会停在 pending（cordis 的 fiber 只要一个 inject 键缺失就整体不激活）。**升级到 2.4.18** 即可；或临时装上 `dsh-better-sidebar`（注意版本线要与内核匹配）并重启 |
+| **远程项目的侧边栏「文件」页签显示的是本地目录（不是远程目录）** | 2.4.18 起已修复：`dsh-better-sidebar` 0.23+ 把文件树从「逐层 `fs.tree`」改成「一次 `fs.trees` 批量列举可见集」，而插件当时只注册了 `fs.tree` 的 exact 路由 → 列举请求**绕过拦截**、落到 better-sidebar 自己的宿主实现（读本地 fs）。升级插件到 **2.4.18** 并重启 DSH 即可；本地工作区不受影响（两条分支都实现了 `fs.trees`）。0.24 新增的 `fs.mkdir`（新建目录）同理，此前只会建在本地镜像里 |
+| **右键「打开方式 / 在文件管理器中显示」打开的是本地镜像目录（不是远端）** | 2.4.18 起已修复：该菜单把**客户端已知的绝对路径**直接交给本机打开器（`explorer.exe /select,<路径>` / `rundll32 url.dll,FileProtocolHandler <url>`），远程工作区里客户端只有镜像路径。现在拦截 `open.external`：远程工作区改开 `vscode://vscode-remote/ssh-remote+<别名><远端路径>`（别名取自 `~/.ssh/config`；`reveal` 打开的是该文件**所在的远端目录**），本地工作区行为不变 |
+| 远程工作区里「用 VS Code 打开」没反应 / 提示连不上 | 需要 `~/.ssh/config` 里有与连接**一致的别名**（Host 同名或 HostName 相同、且端口与用户名一致）——插件据此生成 `ssh-remote+<别名>`，VS Code 会复用该条目的 `Port`/`User`/`IdentityFile`/`ProxyJump`。没有别名且端口不是 22 时插件**回退本机行为**并在 DSH 日志里打一条 warn（避免静默失败）。另外：**不要**在 better-sidebar 的 `openWith.sshHost` 里手填主机——那条分支由客户端自行打开、路径仍是本地镜像路径，交给本插件处理才对 |
 | 内置「终端」页签连不上 | 终端为 `ssh -tt` 交互式通道，**仅支持密钥认证**；密码认证的连接会回退为本地 shell 并打印一行提示（避免把本地 shell 误认为已连上远程），密码认证请改用「文件」页签与模型工具 |
 | 终端落在远程 `$HOME` 而不是工作区目录 | 2.4.5 起已修复（wrapper 会 `cd` 到工作区 `remotePath`，目录不存在时回退 `$HOME`）；若仍停在 `$HOME`，确认 2.4.5 已装入并重启 DSH |
 | 「文件」页签树根显示镜像目录 ID（如 `wmirror3`） | 2.4.6 起已修复：树根改为显示**远程目录名**（如 `my-project`），悬停可见完整远程路径；该标签不经过 `fs.*` 路由，由客户端渲染层替换 |
@@ -219,7 +227,11 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 
 ## 原理
 
-插件注册 6 个 exact 路由（`/sidebar/api/fs.tree`、`fs.read`、`fs.write`、`fs.search`，以及 better-sidebar 0.19 新增的 `fs.rename`、`fs.remove`），在 better-sidebar 的 prefix 路由之前拦截。会话 cwd 含 `.remote-ssh.json` 时走 SSH，否则走本地 fs。客户端看到的是本地镜像路径，Host 自动转换为远程路径——对客户端完全透明。
+插件注册 9 个 exact 路由（`/sidebar/api/fs.tree`、`fs.read`、`fs.write`、`fs.search`，better-sidebar 0.19 新增的 `fs.rename`、`fs.remove`，0.23+ 新增的 `fs.trees`、`fs.mkdir`，以及 0.24 的 `open.external`），在 better-sidebar 的 prefix 路由之前拦截。会话 cwd 含 `.remote-ssh.json` 时走 SSH，否则走本地 fs。客户端看到的是本地镜像路径，Host 自动转换为远程路径——对客户端完全透明。
+
+> `fs.trees` 是 0.23+ 的**批量**列举端点（一次请求带上「工作区根 + 所有已展开目录」，≤64 条；旧版是逐层 `fs.tree`）。远程分支用 `remoteListDirsBatch()` **一次 SSH 往返**列举全部目录（逐目录标记行 + `find -printf`，单层失败只影响该层），命中目录缓存（TTL 5s）的层 0 RTT。少注册这一个路由，新版客户端的整棵文件树就会静默回落到宿主的本地实现 —— 这正是 2.4.18 修的问题。
+
+> `open.external` 是 0.24 的「打开方式 / 在文件管理器中显示」端点，宿主侧用本机打开器执行（Windows：`explorer.exe /select,<路径>`、`rundll32 url.dll,FileProtocolHandler <url>`）。远程工作区里客户端只有镜像路径，本插件因此把路径翻译成远端路径并改开 `vscode://vscode-remote/ssh-remote+<`~/.ssh/config` 别名><远端路径>`：`url` 保留客户端选中的 scheme（vscode / cursor / zed），`reveal` 打开该文件**所在的远端目录**。别名按「Host 同名或 HostName 相同 + 端口一致 + 用户兼容」匹配（纯函数 `remoteEditorAuthority`），让 VS Code 复用该条目的端口/用户/密钥/跳板机；**`~` 由插件自己展开**（URL 不过 shell，`~/run/...` 必须先换成远端 home 的绝对路径 —— 用 `printf %s "$HOME"` 查一次并按 profile 缓存 10 分钟），无可用别名或拿不到 home 时回退本机行为并打 warn。**不要**在 better-sidebar 里填 `openWith.sshHost`——那条分支由客户端自行打开、路径仍是镜像路径。
 
 **模型侧的文件工具（agent 的 `write`/`edit`）**走的是**进程内** `ctx.fs`（宿主 base bundle 挂的是本地 `fs-sandbox`），不经过任何 HTTP 路由，因此 2.4.13 及以前只落**本地镜像**——用户在远端机器上找不到文件，只能人工 `remote_ssh_push`。2.4.14 起插件包装 `ctx.fs` 的 `writeText`/`editText`：**原写入照旧**（镜像内容、沙箱围栏、写意图语义全不变），成功后把同一份内容**定向推回远端对应的那个文件**（不是整镜像 tar，避免用旧镜像覆盖远端其它文件），写前自动 `mkdir -p` 远端父目录。推送失败只记一条 warn——本地写入已成功，桥接层不会让写操作变成失败；包装不可用时（服务缺失/被替换）退回旧行为并在日志提示。
 

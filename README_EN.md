@@ -39,17 +39,19 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 | Item | Requirement |
 | --- | --- |
 | DSH | ≥ 0.1.5-rc.1, **0.2.0-rc.1 included** (the current official line; on the 0.1.2 stable line, use the v0.18.1-era plugin release). The declared peer range names every verified line explicitly, so the new harness compatibility gate (see [Installation](#installation)) does not block it |
-| dsh-better-sidebar | ≥ 0.15 (this plugin uses its `/sidebar/api/fs.*` file API) |
+| dsh-better-sidebar | ≥ 0.15 (this plugin uses its `/sidebar/api/` file API plus 0.24's `open.external` "open with" endpoint; **adapted since 2.4.18**). **This plugin can be installed on its own**: since 2.4.18 a missing better-sidebar no longer stalls web boot (see below), but the remote file tree/editor tab is unavailable without it |
 | Local SSH client | Windows: built-in OpenSSH (`%SystemRoot%\System32\OpenSSH\ssh.exe`); Linux/macOS: openssh-client |
 | Remote host | Any standard sshd (HPC / server / bastion) |
 
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.17
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.18
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
+
+> **Installing this plugin without `dsh-better-sidebar` (or if that bundle fails to load)?** Since 2.4.18 it starts cleanly: the client half declares only core services (`slots`/`locale`) as hard dependencies and reaches better-sidebar through a **child-fiber soft inject** — the remote file editor tab registers when it is present and is silently skipped when it is not. What still works: the settings "Remote connections" section (connections + remote workspaces), the model tools (`remote_ssh_*`), remote terminal integration and `@` remote file completion. What does not: the Files tab's remote read/write and the editor tab — that `/sidebar/api/fs.*` channel belongs to better-sidebar (the built-in sidebar uses its own `/api/*`, which this plugin does not take over). Older releases stayed **pending forever** in that setup, so the frontend reported `web boot: 1 entry did not activate` / `pending (waiting for service: betterSidebar)` (issue [#18](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/18)). The host also logs `patch: entry "better-sidebar" not found` when that bundle is absent — `dsh-app-boot` warns unconditionally about missing patch targets, **which is expected and harmless**.
 
 > **On DSH 0.2.0-rc.1+, does the install get refused or the plugin stay invisible?** The new harness judges compatibility from the **DSH peer version ranges a plugin declares**: if the range does not cover the running version, installation/activation is **rejected** (`Plugin … is incompatible with dsh <version>`) and the plugin manager offers a per-version "accept the risk" exemption instead. Since 2.4.16 this plugin lists every verified line explicitly (`^0.1.0-rc.6 || ^0.1.5-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1`), so **no exemption is needed**. If you are on an older plugin version, upgrade rather than clicking "accept the risk". (The check is strict semver: a prerelease runtime is only covered by a range that names that line explicitly — which is why lines like `0.1.5-rc.1` are listed one by one.)
 
@@ -190,6 +192,7 @@ All SSH commands default to a **120-second** timeout (issue #5): a hung remote c
 | DSH | 0.1.2-rc.1 stable line | ✅ (the 2.3.x-era baseline) |
 | dsh-better-sidebar | 0.15.0 – 0.18.0 | ✅ `fs.tree`/`fs.read`/`fs.write` + `fs.search` (the `{ matches: cwd-relative '/'-separated paths, truncated }` contract, since 2.4.11; returning only `entries` used to crash the whole Files tab on search) |
 | dsh-better-sidebar | 0.19.x | ⚠️ this plugin already supports the 6-endpoint contract (incl. `fs.rename`/`fs.remove`); 0.19.0/0.19.1 themselves cannot load their host half on DSH Desktop until upstream fixes it (see the warning under [Installation](#installation)) |
+| dsh-better-sidebar | **not installed / failed to load** | ✅ **boots normally since 2.4.18** (no more `web boot` block, see [Installation](#installation)): the settings "Remote connections" section, model tools, remote terminal and `@` completion keep working; ⚠️ the Files tab's remote read/write and the editor tab are unavailable (`/sidebar/api/fs.*` belongs to better-sidebar; the built-in sidebar uses its own `/api/*`). The host logs a `patch: entry "better-sidebar" not found` warning, which is expected |
 | Remote sshd | standard OpenSSH (Linux / HPC / Windows) | ✅ key auth; password auth needs `sshpass` on the host (POSIX) |
 
 The plugin never patches DSH sources or injects into the profile dependency tree — everything mounts through the official `cordis.patch.yml` + profile mechanism.
@@ -201,6 +204,7 @@ The plugin never patches DSH sources or injects into the profile dependency tree
 | "Test Connection" reports `Permission denied (publickey)` | ① key has a **passphrase**: the plugin runs in batch mode (`BatchMode=yes`) and cannot prompt — load it with `ssh-add` first, or strip the passphrase; ② on a Windows host where the user is in Administrators, the public key must go to `C:\ProgramData\ssh\administrators_authorized_keys`; ③ the username spelling (`user` / `.\user` / `user@domain`) must match a manual connection |
 | Key auth fails after launching `dsh web` from git-bash | Fixed in 2.3.9: on Windows the ssh binary is pinned to the system OpenSSH absolute path (previously Git's MSYS2 ssh was picked up) |
 | Sidebar Files tab says "Nothing here can view this kind of content yet." | `dsh-better-sidebar` host half failed to load: 0.18.1 / 0.19.0 / 0.19.1 hit the `SessionLogOffset` runtime import on DSH Desktop — downgrade to 0.18.0 or use a fixed build (upstream PR [#641](https://github.com/omdsh-dev/DSH-better-sidebar/pull/641)) |
+| The frontend shows `Failed to load plugins` / `web boot: 1 entry did not activate` / `@zhangfengshun/dsh-remote-ssh: pending (waiting for service: betterSidebar)`, and Desktop offers plugin recovery | Known issue up to 2.4.17 (issue [#18](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/18)): the client half declared better-sidebar's service as a **hard dependency**, so without that bundle the entry stayed pending forever (a cordis fiber does not activate while any injected key is missing). **Upgrade to 2.4.18**, or install `dsh-better-sidebar` (matching your harness line) and restart |
 | Built-in Terminal tab cannot connect | The terminal is an `ssh -tt` interactive channel and supports **key auth only**; password-auth profiles fall back to a local shell and now print a one-line notice (so a local shell is not mistaken for a remote one) — use the Files tab and the model tools for password auth |
 | Terminal opens in the remote `$HOME` instead of the workspace directory | Fixed in 2.4.5 (the wrapper `cd`s into the workspace `remotePath`, falling back to `$HOME` when it no longer exists); if it still starts in `$HOME`, make sure 2.4.5 is installed and DSH restarted |
 | Files tab tree root shows the mirror directory id (e.g. `wmirror3`) | Fixed in 2.4.6: the root row now shows the **remote directory name** (e.g. `my-project`) with the full remote path on hover; that label never passes through the `fs.*` routes, so the client renders the replacement |
