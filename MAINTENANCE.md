@@ -64,10 +64,14 @@
 cd C:\Users\Administrator\Desktop\temp\ChatGPTProProject\dsh-remote-ssh
 # 1. 改代码 + 升 package.json version + 更新 CHANGELOG.md（版本段 + 修复/性能数据）
 # 2. 提交 + 推送 + 发布（一条命令串行）：
-git add lib\index.js lib\client.js package.json CHANGELOG.md
+git add -A
 git commit -m "2.3.x: <一句话说明>"
 git push origin main
-npm publish
+npm publish            # 注意坑 6：本账号的发布会走 registry 侧 staged publish，"输出成功"≠"已公开"
+# 2b. 发布后确认（必做，不要只看 npm view version —— packument 有缓存、会滞后几分钟）：
+#     版本级 URL 返回 200 才算真的公开 →  curl https://registry.npmjs.org/<scope>%2F<pkg>/<版本>
+#     再核对 dist-tags：npm view <pkg> dist-tags        （latest 应指向新版本）
+#     最后回下载对比：npm pack <pkg>@<版本> 的 sha1 应等于 npm publish 输出里的 npm notice shasum
 # 3. （可选）校验 npm 包内容：npm publish --dry-run
 # 4. （可选）本地 pack 与 registry shasum 一致性核对（npm pack --dry-run --json vs
 #    registry dist.shasum）
@@ -91,6 +95,20 @@ dsh plugin --profile desktop add @zhangfengshun/dsh-remote-ssh@<版本>
 5. **版本号一致性纪律**：commit message 以版本号开头（如 `2.3.9: pin ssh to
    System32 OpenSSH...`），CHANGELOG 顶部同步加同版本条目；npm 与 git 必须同时
    走到同一版本，否则后续排查对不上。
+6. **registry 侧 staged publish（2026-09-29 发布 2.4.18 时踩到，会误判"发布失败"）**：
+   本账号（2FA 开启、token 为 `npm_…` 细粒度令牌）的 `npm publish` 由 registry **暂存**受理，
+   npm 照常打印 `npm notice version: x.y.z` 与 `+ @scope/pkg@x.y.z` 并以 0 退出，但版本**不会立刻公开**：
+   - 立刻查会看到旧版本（`npm view version` 仍是上一个版本，packument 缓存 + 暂存未推广），
+     于是很容易以为发布失败；
+   - 重发同一个版本会得到 `npm error code E409 409 Conflict - PUT … Cannot publish over
+     previously staged version "x.y.z"`（**不是**权限问题，也不是版本号被占用）；
+   - `GET https://registry.npmjs.org/-/stage` 与 `npm stage list` 在本机可能显示为空（本地 npm 11.10.0
+     **没有** `stage` 子命令；`npm stage list/view/approve/reject/download` 属于 **npm 12+**，
+     可用 `npx -y npm@12 stage …`，注意会打 `EBADENGINE` 警告：npm 12 要求 node ^24.15.0，本机 24.13.0）。
+   实测（2.4.18）：第一次 `npm publish` 报成功但 registry 无此版本；重发报 E409；**约 8 分钟后
+   `https://registry.npmjs.org/@scope%2Fpkg/2.4.18` 返回 200、`dist-tags.latest` 跟上** —— 即暂存件被
+   推广为正式版本，**无需重新发布**。结论：**发布后先用"版本级 URL"确认，别急着重发**；
+   重发只会得到 409。真正需要人工介入（OTP/网页批准）时，npm 会明确要求 one-time password。
 
 ## 4. 归档会话的读取方法（以后还想翻历史）
 
