@@ -81,9 +81,27 @@ dsh plugin --profile desktop add @zhangfengshun/dsh-remote-ssh@<版本>
 
 ### 已知坑（全部在历史会话中踩过并解决）
 
-1. **`minimumReleaseAge` 供应链策略**：刚发布的新版本立刻 `dsh plugin add` 会被
-   pnpm 拦截（"within the minimumReleaseAge cutoff"）。等几十秒到几分钟重试即可，
-   不是发布失败。
+1. **`minimumReleaseAge` 供应链策略（2026-10-04 实测：窗口 = 24 小时，不是几分钟）**：
+   刚发布的新版本走**应用内插件管理器**安装会被 pnpm 拦下：
+   `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION  <pkg>@<ver> was published at <ISO>, within the
+   minimumReleaseAge cutoff (<ISO>)`。两处证据与结论：
+   - 策略窗口从日志里的 cutoff 反推 = **发布时刻 − cutoff = 24h**（导出 2.4.19 时读
+     `<profile>/.plugin-manager/logs/<operation>/pnpm.log` 看到 cutoff 恰为检查时刻前 24 小时；
+     历史上 2.4.16 也在同一窗口内被拦）；
+   - 它验证的是 **lockfile 里所有 entries**（"Verifying lockfile against supply-chain policies
+     (N entries)"），所以不是"只挡新包"，而是"锁文件里出现未满 24h 的版本就整体拒绝"；
+   - **桌面 profile 是 pnpm 工程**（`<profile>/package.json` + `pnpm-lock.yaml` + `pnpm-workspace.yaml`，
+     `nodeLinker: hoisted`，`autoInstallPeers: false`），应用内插件管理器其实就是在这个目录跑
+     `pnpm add <pkg>@<ver>`（日志可见）；它用的是 **pnpm 11.8.0 + store
+     `%LOCALAPPDATA%\pnpm\store\v11`**，与本机 CLI 的 pnpm（10.x / store v10）**store 不同** ——
+     拿 CLI pnpm 直接 install 会要求"清空并重建 node_modules"
+     （`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`，非 TTY 下被拒），**不要照做**（会牵连 profile 里
+     其它插件）。
+   - 想立刻用上新版本：**就地更新**（把 registry 上该版本 tgz 解出的 `package/*` 覆盖到
+     `<profile>/node_modules/<pkg>/`，并同步 `<profile>/package.json` 的依赖号）。这条路径不经过 pnpm，
+     因此不受 24h 窗口限制；代价是 `pnpm-lock.yaml` 会暂时落后一版 —— 等窗口过去后由管理器安装自动收敛。
+     备份放 `%USERPROFILE%\.dsh\packages\_hotfix-backup\profile-desktop-<时间戳>\`。
+
 2. **npm notice 打到 stderr**：PowerShell 会把它包成 NativeCommandError 红字，
    但发布实际成功——以输出里 `+ @zhangfengshun/dsh-remote-ssh@x.y.z` 和
    `npm whoami` 为准，不要被红字吓到。判断成功可
