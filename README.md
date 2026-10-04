@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.18
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.19
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -210,6 +210,8 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | **右键「打开方式 / 在文件管理器中显示」打开的是本地镜像目录（不是远端）** | 2.4.18 起已修复：该菜单把**客户端已知的绝对路径**直接交给本机打开器（`explorer.exe /select,<路径>` / `rundll32 url.dll,FileProtocolHandler <url>`），远程工作区里客户端只有镜像路径。现在拦截 `open.external`：远程工作区改开 `vscode://vscode-remote/ssh-remote+<别名><远端路径>`（别名取自 `~/.ssh/config`；`reveal` 打开的是该文件**所在的远端目录**），本地工作区行为不变 |
 | 远程工作区里「用 VS Code 打开」没反应 / 提示连不上 | 需要 `~/.ssh/config` 里有与连接**一致的别名**（Host 同名或 HostName 相同、且端口与用户名一致）——插件据此生成 `ssh-remote+<别名>`，VS Code 会复用该条目的 `Port`/`User`/`IdentityFile`/`ProxyJump`。没有别名且端口不是 22 时插件**回退本机行为**并在 DSH 日志里打一条 warn（避免静默失败）。另外：**不要**在 better-sidebar 的 `openWith.sshHost` 里手填主机——那条分支由客户端自行打开、路径仍是本地镜像路径，交给本插件处理才对 |
 | 内置「终端」页签连不上 | 终端为 `ssh -tt` 交互式通道，**仅支持密钥认证**；密码认证的连接会回退为本地 shell 并打印一行提示（避免把本地 shell 误认为已连上远程），密码认证请改用「文件」页签与模型工具 |
+| 「测试连接」报 **`配置的私钥文件不存在或不可读：…`**（或原始信息里有 `Warning: Identity file … not accessible`） | 2.4.19 起会直接点名：连接里 `keyPath` 指向的私钥文件在本机不存在（拼错路径、换机后密钥没同步、或写了 `~` 但文件不在那儿）。改成正确路径，或**清空 `keyPath`** 改为依赖 ssh-agent / `~/.ssh/config` 里的 `IdentityFile`；注意「测试连接」以批处理模式运行，带口令的密钥无法交互输口令（先 `ssh-add`） |
+| 远端要求**扫码 / 动态口令 / 二次验证**（`keyboard-interactive`），「测试连接」仍失败 | 「测试连接」与文件、工具能力走的是**非交互公钥通道**（`BatchMode=yes` + `PreferredAuthentications=publickey`），不会弹出扫码提示 —— 这是刻意设计（批量、并发、无人值守都不能等人工扫码）。**交互式登录请用内置「终端」页签**（`ssh -tt` 交互通道，可扫码/输密码/输动态口令）；要让文件与工具能力可用，请在远端 `~/.ssh/authorized_keys` 收录本机公钥（贴出的 `Permission denied (publickey,password,keyboard-interactive)` 只说明远端**允许**这些方式，不代表本插件能用它们） |
 | 终端落在远程 `$HOME` 而不是工作区目录 | 2.4.5 起已修复（wrapper 会 `cd` 到工作区 `remotePath`，目录不存在时回退 `$HOME`）；若仍停在 `$HOME`，确认 2.4.5 已装入并重启 DSH |
 | 「文件」页签树根显示镜像目录 ID（如 `wmirror3`） | 2.4.6 起已修复：树根改为显示**远程目录名**（如 `my-project`），悬停可见完整远程路径；该标签不经过 `fs.*` 路由，由客户端渲染层替换 |
 | `@` 补全只搜到镜像里那几个文件 | 2.4.7 起已修复：远程工作区会话的 `@` 补全改列远端文件（索引缓存 60s + 900ms 查询预算）；若仍只有镜像文件，确认 2.4.7 已装入并重启 DSH |

@@ -212,7 +212,9 @@ console.log('B3 · 启动方式：detached + 不阻塞请求 + 测试干跑开�
 
 console.log('B4 · 文档与版本')
 {
-  check(pkg.version === '2.4.18', 'package.json 版本 = 2.4.18（当前 ' + pkg.version + '）')
+  // 与 fs-trees-contract 同一纪律：不写死版本号，只断言 package.json 与 CHANGELOG 顶部一致。
+  const headVersion = (changelog.match(/^## \[?(\d+\.\d+\.\d+)\]?/m) || [])[1]
+  check(pkg.version === headVersion, 'package.json 版本与 CHANGELOG 顶部版本一致（' + pkg.version + ' / ' + headVersion + '）')
   check(changelog.includes('open.external'), 'CHANGELOG 记录 open.external 修复')
   check(changelog.includes('vscode-remote/ssh-remote+'), 'CHANGELOG 说明改开 Remote-SSH URL')
   check(readme.includes('open.external'), 'README 写明 open.external 也在拦截清单里')

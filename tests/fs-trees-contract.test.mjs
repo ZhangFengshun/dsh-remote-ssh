@@ -234,7 +234,10 @@ console.log('C3 · 远程工作区探测：fs.trees 没有 path 字段，用 pat
 
 console.log('C4 · 版本与文档')
 {
-  check(pkg.version === '2.4.18', 'package.json 版本 = 2.4.18（当前 ' + pkg.version + '）')
+  // 版本号不写死：真正的不变量是「package.json ↔ CHANGELOG 顶部 ↔ README 安装命令」三者一致
+  // （此前每发一版都要手改这里的字面量，属于测试自己的维护成本）。
+  const headVersion = (changelog.match(/^## \[?(\d+\.\d+\.\d+)\]?/m) || [])[1]
+  check(pkg.version === headVersion, 'package.json 版本与 CHANGELOG 顶部版本一致（' + pkg.version + ' / ' + headVersion + '）')
   check(changelog.includes('2.4.18') && changelog.includes('fs.trees'), 'CHANGELOG 记录 2.4.18 / fs.trees')
   check(readme.includes('fs.trees'), 'README 契约里写明 fs.trees（0.23+ 批量列举）')
 }

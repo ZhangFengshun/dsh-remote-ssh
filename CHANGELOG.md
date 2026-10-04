@@ -2,6 +2,22 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.19] — 认证失败不再"答非所问"：先给一手证据（私钥文件不存在 / 远端允许交互式认证），再给登录横幅降噪
+### 修复
+- **「连接失败：公钥认证失败」把真实根因埋在二维码横幅里（issue [#19](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/19)，2026-10-03 jackie2455 报）**：用户贴出的「测试输出」里真正的根因只有一行 —— `Warning: Identity file "…\id_rsa.cloud_and_wsl" not accessible: No such file or directory.`（**配置的私钥文件根本不存在**），而它被两件事埋掉了：① 这行是 `Warning:` 而不是 `debug1:`，正好落在 `testConnection` 的 `-v` 诊断过滤器之外（过滤器只捞 `debug1: Offering public key|Trying private key|…`）；② 服务端 `/etc/ssh/banner.txt` 的**预认证登录横幅**（腾讯云的扫码二维码 ASCII 画）被拼进了「原始信息」的 300 字截断窗口，把关键行挤了出去 —— 用户因此判断成"是扫码导致的连接失败"。现在认证类失败按**证据优先**重排：
+  - **私钥文件不存在直接作为首条提示**：新增 `findMissingIdentityFile()` 识别 `Warning: Identity file "…" not accessible`（无引号形式与 `debug1: no such identity:` 兜底都覆盖），命中即输出「配置的私钥文件不存在或不可读：<路径>」并给两条可执行动作 —— 改 `keyPath`，或清空 `keyPath` 改用 ssh-agent / `~/.ssh/config` 里的 `IdentityFile`。
+  - **`-v` 诊断过滤器补上这行**：`Identity file .*not accessible` 现在会进入「ssh -v 诊断」，没有预检也看得见。
+  - **交互式认证的边界讲清楚**：新增 `offeredAuthMethods()`，从 `Permission denied (publickey,password,keyboard-interactive)`（或 `Authentications that can continue:`）取远端允许的认证方式；只要含 `password`/`keyboard-interactive` 就补一段说明 —— 扫码、动态口令/二次验证属于**交互式**认证，而本插件的文件与工具能力走**非交互**公钥通道（`BatchMode=yes` + `PreferredAuthentications=publickey`），不会弹出扫码提示；需要交互式登录请用内置**「终端」页签**（shell wrapper 是 `ssh -tt`、不设 BatchMode，可扫码/输密码），文件能力则需在远端 `~/.ssh/authorized_keys` 收录公钥。
+  - **登录横幅降噪**：新增 `stripLoginBanner()` —— 判据是"整行几乎只有装饰字符（框线/方块/ASCII 画）**且**不是诊断行"（诊断行白名单 `debug\d+:` / `Warning:` / `Permission denied` / `Authentications that can continue` / `Identity file` / `Connection …` 等一律保留，短行也保留），命中即丢弃并附一句「（已省略服务端登录横幅 N 行：它在认证前打印，与本机认证结果无关）」，避免用户再把横幅当成报错内容。
+  - **「原始信息」改为诊断行优先**：新增 `sshExcerpt()` 取代原来的 `stderr.trim().slice(0, 300)` 硬截断 —— 有诊断行时只列诊断行（去重、最多 8 行、超长省略），没有才回落到原文。
+- **`keyPath` 预检：私钥文件不在就别等到 SSH 往返之后（但也不阻断探测）**：`testConnection` 先 `expandSshPath()` + `existsSync()` 检查配置的私钥文件；不存在时把「⚠️ 配置的私钥文件不存在：<路径>（若你依赖 ssh-agent 或 `~/.ssh/config` 里的 IdentityFile，可清空 keyPath）」前置到失败原因之前。**仍然照常探测** —— ssh-agent 或 `~/.ssh/config` 里的其它身份可能让连接真的成功，那种情况把这个提醒放进结果的 `warning` 字段，设置页「测试连接」成功时一并显示（此前成功路径只显示 `echo` 回显）。
+- 顺带把送进 `sshErrorHint` 的 stderr 由空格拼接改为**按行拼接**（`sshExcerpt` 按行取诊断才有意义）。
+
+### 测试
+- 新增 `tests/auth-error-diagnostics.test.mjs`（**52 条断言**）：A 段实例化 5 个纯函数（`stripPqBanner` / `stripLoginBanner` / `findMissingIdentityFile` / `offeredAuthMethods` / `sshExcerpt`）跑真实输入 —— 二维码横幅被丢弃且省略行数统计正确、诊断行与短行永不被误删、带引号 / 无引号 / `no such identity:` 三种私钥缺失形态都能取到路径、无证据时不误报、认证方式提取与回落、截断只保留诊断行且超长带省略号；B 段把 issue #19 的**真实 stderr（已脱敏）**喂进 `sshErrorHint`，断言证据在前、路径与修复动作齐全、二维码不出现、不再用泛泛的"公钥认证失败"掩盖根因、交互式边界与「终端」页签指路都在，并以"远端只提供公钥"作负向控制（不硬塞交互式建议）；C 段为接线断言（`existsSync` 预检、`expandSshPath` 展开、成功路径带 `warning`、失败路径前置预检、`-v` 过滤器含 `Identity file … not accessible`、按行拼接、旧硬截断已清零、客户端展示 `warning`、`lib/client.js` 可解析）与版本/文档一致性（含本文与 README 的两处记录）。
+
+- 全套 **20 个文件 774 条断言**通过（含新增 52 条；另把 `fs-trees-contract` / `open-external-contract` 里写死的版本号断言改为「`package.json` 与 CHANGELOG 顶部版本一致」——此前每发一版都要手改测试字面量，属测试自身的维护成本）。
+
 ## [2.4.18] — 适配 better-sidebar 0.23/0.24（`fs.trees`、`fs.mkdir`、`open.external`）+ 未安装 better-sidebar 时不再卡住 web boot
 ### 修复
 - **远程项目的侧边栏文件树显示的是本地目录（用户 2026-09-29 反馈：「侧边栏的文件打开是本地目录而不是远程目录」）**：`dsh-better-sidebar` ≤ 0.22.1 的文件树每展开一层发一次 `fs.tree`（N 次 POST）；**0.23/0.24 起改为一次 `fs.trees` 批量请求「可见集」**（工作区根 + 所有已展开目录，≤64 条，客户端按返回的 `level.path` 落缓存）。本插件此前只注册了 `fs.tree` 的 exact 路由 → 新版的树列举**绕过了拦截**，直接落到 better-sidebar 自己的宿主实现（读本地 fs）→ 远程项目里看到的正是**本地镜像目录**，点开文件也读本地。现在注册 `fs.trees` 并实现批量分支（远程走 SSH，本地照旧走本地 fs）。

@@ -297,3 +297,21 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
   - **热度**由真实 star / fork 决定，无法通过文档操作提升。
 - `screenshots.json`（storefront 展示图清单）与 `assets/` 截图在仓库里，发布
   README 变更时记得同步。
+- **报错文案的第一性：掩埋一手证据等于把用户引向错误方向（issue #19，2026-10-04）**：
+  腾讯云那台机器的失败原因其实只有一行 —— `Warning: Identity file … not accessible`（配置的私钥
+  文件根本不存在），但它 ① 不是 `debug1:` 行，正好被 `testConnection` 的 `-v` 诊断过滤器漏掉；
+  ② `/etc/ssh/banner.txt` 的**预认证登录横幅**（扫码二维码 ASCII 画）塞满了「原始信息」的 300 字
+  截断窗口 —— 用户于是判断成"是扫码导致的连接失败"，把维护者也带偏。现在固化成五条纪律
+  （实现：`stripLoginBanner` / `findMissingIdentityFile` / `offeredAuthMethods` / `sshExcerpt`）：
+  1. **一手证据优先**：stderr 里能直接读出的确定事实（哪个私钥文件不存在、哪个端口被占）放在提示
+     第一条，并**原样回显路径/端口**；泛泛的"公钥认证失败"必须让位。
+  2. **诊断行白名单**：任何降噪都要先放行 `debug\d+:` / `Warning:` / `Permission denied` /
+     `Authentications that can continue` / `Identity file` / `Connection …`，短行也保留。
+  3. **截断按诊断取，不按位置取**：`slice(0, N)` 会被装饰性输出（横幅、二维码）吃光。
+  4. **能力边界写进报错**：远端"允许"交互式认证 ≠ 插件"能用"—— 文件/工具能力是
+     `BatchMode=yes` + `PreferredAuthentications=publickey` 的非交互通道，扫码/动态口令只能走内置
+     「终端」页签（`ssh -tt`，wrapper 里不设 BatchMode）。凡"用户容易以为是 bug、其实是设计"的地方，
+     都要在文案里点明并给替代路径。
+  5. **回归 fixture 用举报人的真实 stderr（脱敏后）**：`tests/auth-error-diagnostics.test.mjs` 直接把
+     #19 贴出的那段（二维码 + Warning + `Permission denied(…)`）喂进 `sshErrorHint`，比自造样例更能
+     防住回归；并配一条"远端只提供公钥"的负向控制，防止提示越写越长。
