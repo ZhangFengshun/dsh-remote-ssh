@@ -46,7 +46,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.21
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.22
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -157,6 +157,7 @@ Returns `{ ok, exitCode, stdout, stderr, error, truncated, isTimeout }` — e.g.
 - **Size sentinel**: before deleting anything it runs `du -sb -c -- <this scope>` (15 s budget, only the scope being synced). Over the limit, probe timeout, no `du` on the remote, unparsable output — **all refused**, requiring an explicit `force: true`. Default 2 GiB (`syncMaxBytes` field or `DSH_REMOTE_SSH_SYNC_MAX_BYTES`).
 - **Mirror-only files are never deleted silently**: before a whole-tree swap the old mirror is compared with the pulled result; if files exist locally that the remote does not have, the sync is refused with a list (up to 20), telling you to either `remote_ssh_push` them first or retry with `force: true`. The plugin's own `.remote-ssh.json` and placeholder `README.md` are recognised by content fingerprint and excluded from the list.
 - **`push` no longer pollutes the remote root**: `.remote-ssh.json` (connection details) is always excluded, as is the plugin's placeholder `README.md` — a `README.md` you wrote yourself is untouched.
+- ⚠️ **`exclude` does not filter paths listed explicitly in `paths`** (tar does not apply `--exclude` to command-line members): to drop a large directory, list its parent in `paths` so the directory becomes a member rather than a target. Also note that an exclude pattern matching nothing is **neither an error nor a warning** (tar semantics), so "I passed an exclude and nothing happened" is not evidence that the option was dropped.
 - **The mirror is an outbound buffer, not a remote snapshot**: the agent's `write` updates both the mirror and the corresponding remote file, and `remote_ssh_push` is the channel that carries such changes back. To read the current remote content inside a session use the Files tab or `remote_ssh_cat` — the mirror may be stale.
 
 ## Model Tools
@@ -243,6 +244,7 @@ The plugin never patches DSH sources or injects into the profile dependency tree
 | Sync refused: "will delete N files that exist only in the mirror" | That is the **data-loss guard**: those files (typically writes >4 MiB that never made it back, or a failed push) would vanish in a whole-tree swap. Run `remote_ssh_push` first, or retry with `force: true` to accept the loss. The plugin's own `.remote-ssh.json` and placeholder `README.md` are not counted |
 | A sync never returns | Since 2.4.20 sync/push have a wall-clock budget (10 minutes by default, `timeoutMs`, 0 = unlimited); on expiry both ends are terminated and the **old mirror is untouched**. Releases ≤2.4.19 had no timeout and could only be killed |
 | **A connection with ProxyJump set: the built-in Terminal tab exits immediately (255, `no argument after keyword "-j"`)** | Fixed in 2.4.21: the terminal wrapper inserted `-J` **between `-o` and its value**, so ssh read `-J` as the keyword of `-o` (lowercased, hence `-j` in the message) and reported "no argument". Upgrade to **2.4.21** and restart DSH (the wrapper is rewritten on every plugin load, so nothing under `~/.dsh/remote-ssh/` needs deleting). Workaround on older versions: clear that connection's ProxyJump (only viable if the target host is directly reachable) |
+| **After a push the remote root contains `.remote-ssh.json` / `README.md`, or `exclude` seems to do nothing** | **A 2.4.20 regression, fixed in 2.4.22**: excludes for the *sync* direction must carry shell quotes (they are interpolated into a remote command string), but the same helper was also used for *push*, where the strings are **argv elements** handed to the local tar (no shell) — the quotes became literal pattern characters, so every `--exclude` failed silently, including the two hard-coded ones. Upgrade to **2.4.22** and restart DSH; **if you already pushed**, delete the stray `.remote-ssh.json` and `README.md` from the remote root (same sizes as those files in the local mirror) |
 | A command hangs forever | The 120s timeout discards the pooled session automatically; use `timeoutMs: 0` for long jobs and `remote_ssh_kill` at any time |
 | Large files are truncated | 4MB per read, ≈6.29MB on the pooled download path (larger files fall back to a one-shot connection); use `remote_ssh_exec` with `head`/`tail` to page through |
 

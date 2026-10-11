@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.21
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.22
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -157,6 +157,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 - **体积哨兵**：删除任何东西之前先 `du -sb -c -- <本次范围>`（15 秒预算，只测要同步的范围）。超过上限、探测超时、远端无 `du`、输出不可解析 —— **一律拒绝**，要求显式 `force: true`。默认上限 2 GiB（`syncMaxBytes` / 环境变量 `DSH_REMOTE_SSH_SYNC_MAX_BYTES` 可调）。
 - **镜像独有文件默认不删**：整树同步前比对旧镜像与拉取结果，发现「远端没有、镜像里有」的文件就拒绝并列出清单（最多 20 条），提示先 `remote_ssh_push` 补推，或确认放弃后加 `force: true`。插件自己写的 `.remote-ssh.json` 与占位 `README.md` 不算（按内容指纹识别）。
 - **`push` 不污染远端根**：始终排除 `.remote-ssh.json`（连接信息绝不推到远端），并排除插件写的占位 `README.md`（你自己写的同名文件不受影响）。
+- ⚠️ **`exclude` 不抑制被显式列进 `paths` 的路径**（tar 对命令行点名的成员不做 `--exclude` 过滤）：要排除大目录，请把 `paths` 提到它的父目录，让大目录成为「成员」而不是「目标」。另外，不匹配任何内容的 exclude 模式**不会报错也不会提示**（tar 的语义），别把"传了没反应"当成参数被丢弃的证据。
 - **镜像目录是"出站缓冲区"，不是远端快照**：agent 的 `write` 会同时写镜像与远端对应文件；`remote_ssh_push` 是这些改动的**回推通道**。要在会话里读远端最新内容请用「文件」页签或 `remote_ssh_cat` —— 镜像里的内容可能已经过期。
 
 ## 模型工具
@@ -247,6 +248,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 同步被拒：「将删除 N 个只存在于镜像、远端没有的文件」 | 这是**数据丢失防线**：镜像里那批文件（常见于 >4 MiB 的写入没能推回远端、或某次 push 失败）在整树替换时会消失。先 `remote_ssh_push` 把它们补推到远端，或确认放弃后带 `force: true` 重试。插件自己的 `.remote-ssh.json` 与占位 `README.md` 不计入这个清单 |
 | 同步很久不返回怎么办 | 2.4.20 起同步/推送有墙钟预算（默认 10 分钟，`timeoutMs` 可调，0 = 不限），到点自动终止两端进程且**不动旧镜像**。旧版本（≤2.4.19）没有超时，只能杀进程 |
 | **填了 ProxyJump 的连接，内置「终端」页签一开就退出（255，`no argument after keyword "-j"`）** | 2.4.21 起已修复：终端 wrapper 拼 ssh argv 时把 `-J` **插进了 `-o` 与其取值之间**，ssh 于是把 `-J` 当成 `-o` 的关键字（关键字小写化后就是报文里的 `-j`）并报「no argument」。升级到 **2.4.21** 并重启 DSH 即可（wrapper 每次加载都会重写，无需手动删 `~/.dsh/remote-ssh/` 下的文件）。旧版本的临时绕过：清空该连接的 ProxyJump（仅当目标机可直达时可行） |
+| **push 之后远端根多出 `.remote-ssh.json` / `README.md`，或者 `exclude` 好像没生效** | **2.4.20 的回归，2.4.22 已修复**：`sync` 方向的排除规则要带 shell 引号（拼进远端命令字符串），但同一条 helper 也被用在了 `push` 方向（字符串作为 **argv** 交给本地 tar，不经 shell）—— 引号于是成了模式的字面字符，所有 `--exclude` 静默失效，连代码写死的两条也没生效。升级到 **2.4.22** 并重启 DSH；**已经 push 过的话**请到远端根删掉多出来的 `.remote-ssh.json` 与 `README.md`（size 与本地镜像里那两个文件一致） |
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |
 

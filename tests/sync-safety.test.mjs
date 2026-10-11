@@ -50,6 +50,9 @@ if (constStart < 0 || regionStart < 0 || regionEnd <= regionStart) {
 const syncRegion = src.slice(constStart, constEnd) + '\n' + src.slice(regionStart, regionEnd)
 const downSrc = grab('async function remoteSyncDown')
 const upSrcOnly = upSrc
+// 用**真实**的 shellQuote（而不是测试自己的近似实现）：issue #22 恰恰是"引号该不该加"的问题，
+// 用桩去断言桩没有意义。
+const realShellQuote = new Function('return ' + grab('function shellQuote'))()
 
 const PROFILE = { id: 'p1', name: 'hpc-a', host: 'hpc-a.example.com', port: 22, user: 'user', keyPath: '/k' }
 const PLACEHOLDER_README = '# 🌐 Remote Workspace / 远程工作区\n\n- Profile: hpc-a\n'
@@ -132,12 +135,12 @@ function build(opts) {
     'process', 'rm', 'mkdir', 'rename', 'cp', 'readdir', 'stat', 'readFile', 'writeFile', 'existsSync',
     'join', 'dirname', 'basename', 'spawnOne', 'readCollected', 'sshArgv', 'shellQuote', 'shellQuotePath',
     'clearCachesForProfile', 'remoteWorkspaceReadme',
-    syncRegion + '\nreturn { remoteSyncDown: remoteSyncDown, remoteSyncUp: remoteSyncUp, scanMirrorOnly: scanMirrorOnly, formatSyncBytes: formatSyncBytes, syncOptsFrom: syncOptsFrom };'
+    syncRegion + '\nreturn { remoteSyncDown: remoteSyncDown, remoteSyncUp: remoteSyncUp, scanMirrorOnly: scanMirrorOnly, formatSyncBytes: formatSyncBytes, syncOptsFrom: syncOptsFrom, syncTarExcludes: syncTarExcludes, syncTarPaths: syncTarPaths };'
   )(
     process, loggedRm, mkdir, rename, cp, readdir, stat, readFile, writeFile, existsSync,
     join, dirname, basename, spawnOne, readCollected,
     (p, cmd) => ['ssh', '-o', 'BatchMode=yes', p.user + '@' + p.host, cmd],
-    (s) => "'" + String(s) + "'", (s) => "'" + String(s) + "'",
+    realShellQuote, (s) => "'" + String(s) + "'",
     (p) => { cleared.push(p.id) },
     (n, rp) => '# 🌐 Remote Workspace / 远程工作区\n\n- Profile: ' + n + '\n- Root: ' + rp + '\n'
   )
@@ -307,8 +310,9 @@ console.log('D · push 护栏（不污染远端根）')
     check(r.ok === true && r.remotePath === '~/proj-root', 'push 成功回传 remotePath')
     check(h.cleared.length === 1, 'push 成功后清空该 profile 的读/列举缓存')
     const argv = h.spawns.find((s) => s.role === 'localTar').argv.join(' ')
-    check(/--exclude='\.\/\.remote-ssh\.json'/.test(argv), 'push 始终排除 .remote-ssh.json（连接信息不进远端）')
-    check(/--exclude='\.\/README\.md'/.test(argv), 'push 排除插件占位 README（按指纹判定）')
+    check(/--exclude=\.\/\.remote-ssh\.json(\s|$)/.test(argv), 'push 始终排除 .remote-ssh.json（argv 语境 → 裸模式）')
+    check(/--exclude=\.\/README\.md(\s|$)/.test(argv), 'push 排除插件占位 README（按指纹判定，裸模式）')
+    check(!/--exclude=[^ ]*['"]/.test(argv), 'push 的每一条 --exclude 都不带引号（带引号=模式不匹配=静默失效，issue #22）')
     check(argv.indexOf('--exclude') < argv.indexOf('-C'), 'tar 选项在操作数之前（GNU/BSD tar 都可移植）')
     const ssh = h.spawns.find((s) => s.role === 'ssh')
     check(!/exclude/.test(ssh.remoteCmd), '排除规则只在本地打包侧生效，远端命令保持简单')
@@ -320,7 +324,7 @@ console.log('D · push 护栏（不污染远端根）')
     await h.fns.remoteSyncUp(null, PROFILE, '~/proj-root', mirror, {})
     const argv = h.spawns.find((s) => s.role === 'localTar').argv.join(' ')
     check(!/README\.md/.test(argv), '用户自己的 README.md 不被排除（指纹不匹配时不误伤）')
-    check(/--exclude='\.\/\.remote-ssh\.json'/.test(argv), '无论镜像内容如何，.remote-ssh.json 始终被排除')
+    check(/--exclude=\.\/\.remote-ssh\.json(\s|$)/.test(argv), '无论镜像内容如何，.remote-ssh.json 始终被排除（裸模式）')
   })
 }
 {
@@ -363,8 +367,11 @@ console.log('F · 静态防线（源码级不变式）')
   check(downSrc.indexOf('scanMirrorOnly') < downSrc.indexOf('swapMirrorDir'), '比对早于原子替换（拒绝时不产生任何破坏）')
   check(/swapMirrorDir\(mirrorPath, tmpDir\)/.test(downSrc), '整树同步走 swapMirrorDir（原子替换 + 失败回滚）')
   check(/cp\(from, join\(mirrorPath, rel\)/.test(downSrc), '局部同步只 cp 子路径，不删除镜像里的其它文件')
-  check(/--exclude=" \+ shellQuote\("\.\/\.remote-ssh\.json"\)/.test(upSrcOnly), 'remoteSyncUp 始终排除 .remote-ssh.json')
-  check(/isMirrorPlaceholderReadme\(head\)/.test(upSrcOnly), 'remoteSyncUp 用内容指纹判定占位 README')
+  check(/syncTarExcludes\(o\.exclude, true\)/.test(downSrc), 'sync 方向 forShell=true（结果拼进远端命令字符串，必须带 shell 引号）')
+  check(/syncTarExcludes\(o\.exclude\)/.test(upSrcOnly), 'push 方向裸模式（结果进本地 tar 的 argv）')
+  check(!/\bshellQuote\(/.test(upSrcOnly), 'remoteSyncUp 里不再出现 shellQuote（argv 语境不允许引号，issue #22）')
+  check(/excludes\.push\("--exclude=\.\/\.remote-ssh\.json"\)/.test(upSrcOnly), 'remoteSyncUp 始终排除 .remote-ssh.json（裸模式）')
+  check(/excludes\.push\("--exclude=\.\/README\.md"\)/.test(upSrcOnly), 'remoteSyncUp 用内容指纹判定占位 README（裸模式）')
 
   const wsSchema = src.slice(src.indexOf('const WorkspaceSchema'), src.indexOf('const PrefsSchema'))
   check(/syncExclude: z\.array/.test(wsSchema) && /syncPaths: z\.array/.test(wsSchema) && /syncMaxBytes: z\.number/.test(wsSchema), 'WorkspaceSchema 持久化 syncExclude / syncPaths / syncMaxBytes')
@@ -386,6 +393,82 @@ console.log('F · 静态防线（源码级不变式）')
   const downCount = (src.match(/remoteSyncDown\(subprocess, runPooled, /g) || []).length
   check(downCount === 2, '两处 sync 入口都把 runPooled 作为体积探测 runner 传入（实际 ' + downCount + '）')
   check(!/remoteSyncDown\(subprocess, p, ws\.remotePath/.test(src), '没有任何入口还在用旧签名调用 remoteSyncDown')
+}
+
+console.log('H · 两个引用语境（issue #22）：push 走 argv 必须裸模式，sync 走远端 shell 必须带引号')
+{
+  const { spawnSync } = await import('node:child_process')
+  const TAR = process.env.DSH_TEST_TAR || 'tar'
+  const probe = spawnSync(TAR, ['--version'], { encoding: 'utf8' })
+  const tarOk = !probe.error && probe.status === 0
+  const tarVer = tarOk ? String(probe.stdout).split('\n')[0].trim() : ''
+  const BASH = process.env.DSH_TEST_BASH || 'bash'
+  const bashProbe = spawnSync(BASH, ['-lc', 'printf ok'], { encoding: 'utf8' })
+  const bashOk = !bashProbe.error && String(bashProbe.stdout).indexOf('ok') >= 0
+
+  // 单元级：同一个 helper 的两种形态
+  const h0 = build({})
+  check(h0.fns.syncTarExcludes(['a', 'b'], true).join(' ') === "--exclude='./a' --exclude='./b'", 'forShell=true → 带 POSIX 单引号（shell 语境）')
+  check(h0.fns.syncTarExcludes(['a', 'b']).join(' ') === '--exclude=./a --exclude=./b', 'forShell 缺省 → 裸模式（argv 语境）')
+  check(h0.fns.syncTarExcludes(['../x', '/etc', '~', '.'], false).length === 0, '两种形态都先过越界归一化（../ /绝对 /~ /"." 丢弃）')
+
+  // 端到端 A：push 用**实际生成**的 argv 喂真实 tar —— 归档里到底有没有那些文件
+  await withMirror(
+    {
+      '.remote-ssh.json': '{"host":"hpc-a.example.com","user":"user","keyPath":"/k"}',
+      'README.md': PLACEHOLDER_README,
+      'keep.txt': 'K',
+      '_patch/a.txt': 'P',
+      'data/big.bin': 'D'
+    },
+    async (mirror, parent) => {
+      const h = build({})
+      const r = await h.fns.remoteSyncUp(null, PROFILE, '~/proj-root', mirror, { exclude: ['_patch', 'data'] })
+      check(r.ok === true, 'H-A push 调用成功（假 ssh 消费掉管道）')
+      const tarSpawn = h.spawns.find((s) => s.role === 'localTar')
+      const excludes = tarSpawn.argv.filter((a) => a.indexOf('--exclude=') === 0)
+      check(excludes.length === 4, 'H-A 生成 4 条排除（用户 2 条 + 写死 2 条），实际 ' + excludes.length)
+      if (!tarOk) {
+        console.log('  … 跳过真实 tar 断言（本机没有可用的 tar）')
+      } else {
+        const arc = join(parent, 'push.tar')
+        const run = spawnSync(TAR, ['cf', arc].concat(excludes, ['-C', mirror, '.']), { encoding: 'utf8' })
+        check(run.status === 0, 'H-A 真实 tar 用生成的 argv 打包成功（' + tarVer + '）')
+        const listing = String(spawnSync(TAR, ['tf', arc], { encoding: 'utf8' }).stdout)
+        check(!/\.remote-ssh\.json/.test(listing), 'H-A 真实归档里没有 .remote-ssh.json（连接信息不泄漏到远端根）')
+        check(!/^\.\/README\.md$/m.test(listing), 'H-A 真实归档里没有插件占位 README.md')
+        check(!/_patch|data\//.test(listing), 'H-A 真实归档里没有用户 exclude 的 _patch/ 与 data/')
+        check(/\.\/keep\.txt/.test(listing), 'H-A 真实归档里仍有 keep.txt（排除没把内容一起干掉）')
+
+        // 负向控制：带引号的旧形状必须被同一判据判为"泄漏"（证明这条判据能抓到 issue #22）
+        const arcBad = join(parent, 'push-bad.tar')
+        const badExcludes = excludes.map((e) => "--exclude='" + e.slice('--exclude='.length) + "'")
+        spawnSync(TAR, ['cf', arcBad].concat(badExcludes, ['-C', mirror, '.']), { encoding: 'utf8' })
+        const badListing = String(spawnSync(TAR, ['tf', arcBad], { encoding: 'utf8' }).stdout)
+        check(/\.remote-ssh\.json/.test(badListing) && /_patch/.test(badListing),
+          'H-A 负向控制：带引号时这些文件确实漏进归档（= 2.4.20 的实际行为）')
+      }
+    }
+  )
+
+  // 端到端 B：sync 方向生成的远端命令 —— 引号必须能被 POSIX shell 正确剥离成裸模式
+  await withMirror({}, async (mirror) => {
+    const h = build({ remoteTree: { 'src/a.txt': 'A' }, probeBytes: 100 })
+    await h.fns.remoteSyncDown(null, h.runner, PROFILE, '~/proj-root', mirror, { exclude: ['data', '*.log'] })
+    const ssh = h.spawns.find((s) => s.role === 'ssh')
+    check(/--exclude='\.\/data'/.test(ssh.remoteCmd) && /--exclude='\.\/\*\.log'/.test(ssh.remoteCmd),
+      'H-B sync 侧排除带 shell 引号（远端 shell 语境，防注入/防通配）')
+    if (!bashOk) {
+      console.log('  … 跳过 shell 剥离断言（本机没有可用的 bash）')
+    } else {
+      // 把生成的那两条 --exclude=… 交给真实 POSIX shell，看它解析后的实参是什么
+      const pats = ssh.remoteCmd.match(/--exclude=('[^']*'|\S+)/g) || []
+      const out = String(spawnSync(BASH, ['-lc', 'printf "%s\\n" ' + pats.join(' ')], { encoding: 'utf8' }).stdout)
+      const got = out.trim().split('\n')
+      check(got.join(' ') === '--exclude=./data --exclude=./*.log',
+        'H-B 经真实 POSIX shell 解析后正好退化成裸模式（与 H-A 证明可用的形态一致）')
+    }
+  })
 }
 
 console.log('G · 选项组装与持久化')

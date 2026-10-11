@@ -2,6 +2,24 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.22] — push 侧 `--exclude` 全部失效：同一个 helper 跨了 shell 边界（2.4.20 的回归）
+### 修复
+- **`remote_ssh_push` 的排除规则一条都没生效，包括代码里写死的那两条（issue [#20](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/20) 重测，2026-10-11 SundaeYAGO 报）**：`syncTarExcludes()` 用 `shellQuote()` 把模式包成 POSIX 单引号 —— 这对 **sync 方向**是对的（结果被拼进**远端命令字符串**，由远端 shell 解释），但 **push 方向**把同样的字符串当 **argv 元素**交给本地 tar：argv 不经 shell，`--exclude='./x'` 里的引号于是成了模式的**字面字符**，匹配不到 `./x`。
+  - **后果**：`.remote-ssh.json`（含 profileId / host / port / user / keyPath / remotePath）与占位 `README.md` **真的被解到了远端根目录**；用户显式 `exclude` 掉的目录也照推 —— 2.4.20 CHANGELOG 里「连接信息**绝不**推到远端」那句承诺当时并不成立。举报人用真实 bsdtar + 插件生成的精确 argv 复现（远端根 11 项 → 14 项，两个文件的 size/mtime 与本地镜像源文件逐字节一致）。
+  - **静默**：`GNU tar 1.35` / `bsdtar 3.8` 对「不匹配任何成员」的 `--exclude` 都退出 0，既不报错也不提示，只能靠比对远端根才发现（这也解释了为什么它能一路发出去）。
+  - **修法**：`syncTarExcludes(list, forShell)` —— `forShell: true`（sync 方向，拼命令字符串）保持 `shellQuote`；argv 语境（push 方向）用**裸模式**；写死的两条（`.remote-ssh.json`、占位 `README.md`）同样改裸模式。
+- **已经 push 过的用户可以自查自清**：远端根若多出 `.remote-ssh.json` / `README.md`（size 与本地镜像里的那两个文件一致），删掉即可；升级到 2.4.22 后不会再推。
+- **文档补一条 tar 语义**（举报人指出，非缺陷）：`exclude` **不会**抑制被显式列进 `paths` 的路径 —— tar 对命令行点名的成员不做 `--exclude` 过滤；要排除大目录，请把 `paths` 提到它的父目录，让大目录成为「成员」而不是「目标」。工具描述与 README 都已写明（另注明：不匹配任何内容的 exclude 模式不会报错，所以"传了无效 exclude 却没反应"不能反过来当作参数被丢弃的证据）。
+
+### 测试
+- `tests/sync-safety.test.mjs` 86 → **103 条断言**：
+  - **真实 tar 端到端，且消费的是生成出来的 argv**（不是我手打的近似）：捕获 `remoteSyncUp` 实际 spawn 的 `--exclude=…` 参数，交给本机真实 tar 打包并列出归档，断言 `.remote-ssh.json` / 占位 `README.md` / 用户 exclude 的目录都不在归档里、`keep.txt` 仍在；配**负向控制** —— 把这些模式重新加引号，同一判据必须判为泄漏（复现 2.4.20 的实际行为，本机 `bsdtar 3.8.8` 实测）。
+  - sync 侧的 shell 语境：断言生成的远端命令里排除**带**引号，并把这两条 `--exclude=…` 交给真实 POSIX shell，断言解析后正好退化成裸模式（= 上一条已证明可用的形态）—— 两个语境各自闭环。
+  - 单元级：`syncTarExcludes` 两种形态 + 越界归一化照旧生效。
+  - 测试注射的 `shellQuote` 换成**从源码抽出的真实实现** —— issue #22 恰恰是「引号该不该加」，用桩去断言桩没有意义。
+  - 修正旧断言：D / F 段此前断言的正是**带引号的形状**（等于把 bug 一起断言了）。这是两天内第二次「测试断言了产物、而不是行为」（前一次是 wrapper 的 proxyJump 分支从未被任何场景走过），已写进 `MAINTENANCE.md`。
+- 全套 **21 个文件 894 条断言**通过（原 877 条）。
+
 ## [2.4.21] — 填了 ProxyJump 的连接，内置「终端」页签不再一开就退出 255（`no argument after keyword "-j"`）
 ### 修复
 - **配了 ProxyJump 的连接里，内置「终端」页签永远打不开（issue [#21](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/21)，2026-10-11 berries-tart 报）**：终端 wrapper（`~/.dsh/remote-ssh/dsh-remote-shell.js`）拼 ssh argv 时，用**位置插入**把 ProxyJump 塞进了 `-o` 与其取值之间：
