@@ -2,6 +2,40 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.24] — Desktop 终端再也起不来（wrapper 裸调 `node`）；写回桥推送失败对模型不可见
+### 修复
+- **DSH Desktop 上集成「终端」页签 100% 打不开：wrapper 裸调 `node`（issue [#23](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/23)，2026-10-11 SundaeYAGO 报）**。生成出来的两个薄壳（`.cmd` / POSIX `sh`）此前都是裸名 `node "…/dsh-remote-shell.js"`，而**桌面端按设计不把自带 node 放进子进程 PATH**（举报人逐条引证官方源码与设计笔记：`packageManager` 的 JSDoc 明写只覆盖包操作、`installPrimaryRuntime` 明写不改 PATH、宿主自己是用**绝对路径**的 node 去跑 pnpm；`runtime\bin\node.cmd` 垫片依赖的 `DSH_DESKTOP_NODE_EXECUTABLE` 又恰在子进程环境的脱敏名单里）。于是 PATH 上没有 node 的机器（桌面端的主流状态）一开终端就是 cmd 的 `'node' is not recognized…` 并立刻退出 —— 与 SSH、密钥、跳板机全都无关。
+  - **修法**：与同一份 wrapper 里 `ssh` 早就采用的做法同构（`sysSsh` 绝对路径 + 回退），node 也解析成**绝对路径**写死进薄壳，优先级：`nodePath` 设置 → 环境变量 `DSH_REMOTE_SSH_NODE` → **正在运行本插件的那个解释器**（`process.execPath`，且文件名形如 `node`/`node.exe` 时才用 —— 桌面端若以 Electron 可执行文件为主进程，用它只会再开一个 DSH 实例）→ `DSH_DESKTOP_NODE_EXECUTABLE` → 与解释器同目录的 node。
+  - **刻意不去猜 DSH 的私有 runtime 目录**：举报人明确不建议（那需要官方点头），本文只用"自己的解释器"与"用户显式给的路径"。
+  - **失败要可操作**：写死路径失效（换机/卸载）时回退 `where node` / `command -v node`；两条都失败就打一条说明"这是本插件的终端、桌面端为何没有 node、`nodePath` 怎么配"的错误并 `exit 127`，而不是把 cmd 的原文糊到用户脸上。POSIX 半边只用 shell 内建（`${0%/*}`、`command -v`、`exec`），连 `dirname` 都不依赖。
+  - 新增设置项 `nodePath`（留空 = 自动解析）与环境变量 `DSH_REMOTE_SSH_NODE`；解析结果与来源写一行日志。
+- **`write` / `edit` 在推送失败时照常返回成功，模型以为远端已有该文件（issue [#24](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/24)，同一举报人）**。写回桥的注释里写着"写好了就意味着远端也已有"，但失败路径只打一行宿主日志：
+  - **确定性失败**：内容超过 `MAX_BYTES`（4 MiB）时 `remoteWriteFile` 直接返回失败 —— 一个日志、一个 CSV、一个 notebook 就够，而 4 MiB 不是难以触及的门槛。
+  - **其余失败**：ssh 断开、权限、配额，同样静默。
+  - **修法①（消灭确定性失败）**：写回桥改走 `remoteWriteFileChunked` —— 超过 4 MiB 时按 **3 MiB** 分块 base64 追加（3 的倍数 → 非末块不带 padding，可直接拼接；先按 UTF-8 编码成 Buffer 再切**字节**，避免劈开代理对），首块 `>`、后续 `>>`，最后用 `wc -c` 校验远端字节数，任一块失败即报出块序号并提示文件可能被截断。小文件仍是一次 `base64 -d >`（行为与 2.4.23 相同，无额外往返）。
+  - **修法②（失败可见）**：推送失败默认**抛错**，消息写清"本地镜像已写入成功、只是没同步到远端"、远端路径、原因，并给出 `remote_ssh_push` 补推路径。**为什么只能选"报错"而不能"在成功结果里附一条警告"**：本版 `write` 工具的输出 schema 是 `additionalProperties: false` 且只取 `path`/`operation`/`before`/`after`，`execute` 自己重建返回对象（附加字段到不了模型），成功渲染又是固定信封 —— 已按打包产物逐行核对。想恢复旧行为：设置 `writeBackFailure: "log"`（或 `DSH_REMOTE_SSH_WRITEBACK_FAILURE=log`）。
+  - **护栏（举报人的可选建议 A）**：工作区可设 `writeBack: false` 整体关掉写回，或用 `writeBackExclude` 排除路径（镜像相对路径，支持 `*` / `**` / `?`，结尾带 `/` 视为目录前缀）—— 免得草稿、验证脚本、抓取 dump 被无声推到共享集群的项目目录。两者默认都不改变旧行为。
+  - **护栏 B（写回前的远端新鲜度检查）本版未做**，原因见下：它需要记录"上次推给远端的是什么"（新状态存储 + 陈旧判定语义），不是一次往返能解决的；举报人也把它列为可选护栏，留作后续单独设计。
+  - 一个需要知道的副作用：报错会让宿主**不记录这次写入的"已观测"状态**（工具把异常当失败路径处理），于是紧接着对同一文件的 `edit` 会要求先 `read`。方向是安全的（宁可多读一次），读的仍是本地镜像里的完整内容。
+
+### 测试
+- `tests/wrapper-terminal.test.mjs` 29 → **59 条断言**：
+  - node 解析优先级（设置 > 环境变量 > `process.execPath`；配置路径不存在时不盲用）；
+  - 薄壳文本（写死绝对路径、旧形状已消除、PATH 回退、可操作错误 + 127、路径里的 `'` 与 `%` 转义）；
+  - **真实 `.cmd` 端到端 + 干净 PATH**（`PATH=C:\Windows\System32`）：假 node 留下标记证明走的是写死的绝对路径；**负向控制**把旧形状放回同一环境，必须复现 `'node' is not recognized`；写死路径失效时是 127 + 插件自己的提示；真 node + 干净 PATH 时失败点**后移到 ssh**（退出码 255，正是举报人给的验收判据）；
+  - **POSIX 半边在 WSL 里真实执行**，`PATH=/nonexistent` 也能跑（只用 shell 内建）、`bash -n` 语法检查、缺 node 时 127 + 可操作提示。
+- `tests/fs-write-bridge.test.mjs` 33 → **67 条断言**：
+  - **分块上传**：7 MiB 载荷（含中文与 emoji）→ 分块数 = `ceil(字节数 / 3 MiB)`、首块 `>` 后续 `>>`、非末块无 padding、**各块解码后拼接与原内容逐字节相同**、`wc -c` 校验、字节数不一致判失败、中途失败报块序号；**负向控制**：旧路径对同一内容是确定性失败（模型看不见）；
+  - **glob 语义**：`**` 跨目录、`*` 不跨目录、`?` 单字符、精确路径、结尾 `/` 目录前缀（且 `_patch/` 不误伤 `_patch2/`）、正则元字符按字面、空规则不排除；
+  - **失败可见端到端**：标记过的失败让 `writeText` 抛错且消息点明本地已写入并给出 `remote_ssh_push`；未标记的异常仍只告警、写入结果照常返回。
+- 全套 **22 个文件 / 1026 条断言**通过（上一版 22 个文件 / 962 条）。
+
+### 升级
+```bash
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.24
+```
+升级后**重启 DSH**（终端 wrapper 每次加载都会重写）。
+
 ## [2.4.23] — Windows 上拉取非 ASCII 文件名被静默改写（`报告.csv` → `鎶ュ憡.csv`）；顺带给出旧乱码名的清理通道
 ### 修复
 - **Windows 上 `remote_ssh_sync` 会把非 ASCII 文件名拉成乱码，且完全静默；随后一次 push 就把乱码名固化到远端（issue [#22](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/22)，2026-10-11 SundaeYAGO 报，1450 文件镜像里 7 个非 ASCII 名 7/7 中招、7/7 可逆）**。三方各自都没错，错在组合：

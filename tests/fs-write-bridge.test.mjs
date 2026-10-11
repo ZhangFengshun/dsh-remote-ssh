@@ -157,11 +157,153 @@ console.log('C · 接线')
   check(/installFsWriteBridge\(svc, \{ onWritten: mirrorWriteToRemote, log: ctx\.logger \}\)/.test(src), '桥接到 mirrorWriteToRemote')
   check(/if \(restoreFsWrite\) \{ try \{ restoreFsWrite\(\); \}/.test(src), '清理时恢复原方法')
   check(/const hit = findMirrorRoot\(absPath\);\s*\n\s*if \(!hit\) return;/.test(src), '非镜像路径直接返回（本地工作区零影响）')
-  check(/await remoteWriteFile\(runPooled, p, remoteFile, content\)/.test(src), '用既有 remoteWriteFile 定向写该文件（不是整镜像 tar）')
+  check(/await remoteWriteFileChunked\(runPooled, p, remoteFile, content\)/.test(src), '走 remoteWriteFileChunked 定向写该文件（小文件内部仍走 remoteWriteFile，>4 MiB 分块）')
   check(/"mkdir -p " \+ shellQuotePath\(remoteDir\)/.test(src), '写前 mkdir -p 远端父目录（新目录里的新文件）')
-  check(/await runPooled\(p, "mkdir -p/.test(src) && /await remoteWriteFile/.test(src), '两步都在同一池化会话（连接复用）')
+  check(/await runPooled\(p, "mkdir -p/.test(src) && /await remoteWriteFileChunked/.test(src), '两步都在同一池化会话（连接复用）')
   check(/本地镜像已写入/.test(src), '推送失败时的告警文案说明本地已写入')
   check(!/remoteSyncUp\(/.test(grab('async function mirrorWriteToRemote')), '不调用整镜像 push（避免用旧镜像覆盖远端其它文件）')
+}
+
+// ---------------------------------------------------------------------------
+// issue #24：写回桥的失败可见性与护栏
+//   ① >4 MiB 的内容不再确定性失败（分块 base64 追加 + 远端字节数校验）
+//   ② 每个工作区可关掉写回或排除路径（writeBack / writeBackExclude）
+//   ③ 推送失败默认抛错让模型看见（工具报错是本版 DSH 上唯一的模型可见通道）
+// ---------------------------------------------------------------------------
+const chunkApi = new Function(
+  'dirname', 'join', 'existsSync', 'readFileSync', 'MAX_BYTES', 'shellQuotePath', 'invalidateRemoteCaches', 'syncErrText', 'remoteWriteFile',
+  grab('function remoteWriteFileChunked') + '\n' + grab('function globToRegExp') + '\n' + grab('function matchAnyGlob') +
+  '\nreturn { remoteWriteFileChunked, globToRegExp, matchAnyGlob };'
+)(
+  (await import('node:path')).dirname,
+  (await import('node:path')).join,
+  (await import('node:fs')).existsSync,
+  (await import('node:fs')).readFileSync,
+  4 * 1024 * 1024,                                   // 与 lib 里的 MAX_BYTES 一致（下面的载荷要越过它）
+  (s) => "'" + String(s) + "'",
+  () => {},
+  (e) => String((e && e.message) || e),
+  // 真实的 remoteWriteFile 语义（4 MiB 守卫 + base64 -d 单发）——负向控制要用它
+  async (runner, p, path, content) => {
+    const c = content !== undefined ? String(content) : ''
+    if (c.length > 4 * 1024 * 1024) return { ok: false, exitCode: -1, stdout: '', stderr: '', error: '写入内容超过 ' + 4 * 1024 * 1024 + ' 字节上限', truncated: false }
+    return runner(p, 'base64 -d > ' + "'" + path + "'", Buffer.from(c, 'utf8').toString('base64'), 4 * 1024 * 1024, true)
+  }
+)
+
+/** 假 runner：把每次调用的命令与 stdin 记下来，按脚本应答。 */
+function fakeRunner(opts = {}) {
+  const calls = []
+  const fn = async (p, cmd, stdinData) => {
+    calls.push({ cmd, stdin: stdinData === undefined ? '' : String(stdinData) })
+    if (opts.failAt !== undefined && calls.length === opts.failAt) return { ok: false, exitCode: 1, stdout: '', stderr: 'disk full', error: 'disk full' }
+    if (/^wc -c </.test(cmd)) return { ok: true, exitCode: 0, stdout: String(opts.reportBytes !== undefined ? opts.reportBytes : opts.expectBytes) + '\n', stderr: '' }
+    return { ok: true, exitCode: 0, stdout: '', stderr: '' }
+  }
+  fn.calls = calls
+  return fn
+}
+
+console.log('D1 · 分块上传：>4 MiB 不再确定性失败（issue #24 主线）')
+{
+  // 7 MiB 载荷，含多字节字符：中文 + emoji + 末尾不足 3 字节的尾巴
+  const base = '数据📊 line\n'
+  const payload = base.repeat(Math.ceil((7 * 1024 * 1024) / base.length)).slice(0, 7 * 1024 * 1024)
+  const bytes = Buffer.byteLength(payload, 'utf8')
+  check(bytes > 4 * 1024 * 1024, '测试载荷确实越过 4 MiB（' + bytes + ' 字节）')
+
+  // 负向控制：旧的 remoteWriteFile 对同一内容是确定性失败（issue #24 报的就是这个）
+  const legacyRunner = fakeRunner({})
+  const legacyCall = await (async () => {
+    // 注入的 remoteWriteFile 语义（4 MiB 守卫 + base64 -d 单发）
+    const fn = new Function('runner', 'p', 'path', 'content', 'return (async () => { const c = String(content); if (c.length > 4 * 1024 * 1024) return { ok: false, error: "写入内容超过 " + 4 * 1024 * 1024 + " 字节上限" }; return runner(p, "base64 -d > " + path, Buffer.from(c, "utf8").toString("base64")); })()')
+    return fn(legacyRunner, {}, '/r/big.txt', payload)
+  })()
+  check(legacyCall.ok === false && /4 MiB|上限/.test(String(legacyCall.error) || ''),
+    '负向控制：旧路径对 7 MiB 内容是确定性失败（只落日志，模型看不见）')
+
+  const runner = fakeRunner({ expectBytes: bytes })
+  const r = await chunkApi.remoteWriteFileChunked(runner, {}, '/remote/big.txt', payload)
+  check(r.ok === true, '新路径成功（不再因体积失败）')
+  const writes = runner.calls.filter((c) => /^base64 -d /.test(c.cmd))
+  const expectChunks = Math.ceil(bytes / (3 * 1024 * 1024))
+  check(writes.length === expectChunks, '分块数 = ceil(字节数 / 3 MiB) = ' + expectChunks + '（按字节切，不是按字符）')
+  check(/^base64 -d > /.test(writes[0].cmd) && writes.slice(1).every((c) => /^base64 -d >> /.test(c.cmd)),
+    '首块用 > 覆盖、后续用 >> 追加')
+  // 关键性质：块大小是 3 的倍数 → 非末块 base64 不带 padding，可直接拼接
+  check(writes.slice(0, -1).every((c) => !c.stdin.includes('=')), '非末块 base64 无 padding（可直接拼接）')
+  const joined = Buffer.concat(writes.map((c) => Buffer.from(c.stdin, 'base64')))
+  check(joined.equals(Buffer.from(payload, 'utf8')), '各块解码后拼接的字节与原内容逐字节相同（多字节字符未被劈开）')
+  check(runner.calls.some((c) => /^wc -c </.test(c.cmd)), '写后用 wc -c 校验远端字节数')
+  check(r.bytes === bytes, '返回值带回实际字节数（日志用）')
+
+  // 中途失败 → 明确报出第几块，并提示可能截断
+  const bad = fakeRunner({ failAt: 2 })
+  const rb = await chunkApi.remoteWriteFileChunked(bad, {}, '/remote/big.txt', payload)
+  check(rb.ok === false && new RegExp('第 2/' + expectChunks + ' 块').test(String(rb.error)) && /截断/.test(String(rb.error)),
+    '中途失败 → 报出块序号并提示远端文件可能被截断')
+
+  // 字节数不一致 → 失败（防"命令都成功但文件少一截"）
+  const wrong = fakeRunner({ reportBytes: bytes - 1 })
+  const rw = await chunkApi.remoteWriteFileChunked(wrong, {}, '/remote/big.txt', payload)
+  check(rw.ok === false && /不一致/.test(String(rw.error)), '远端字节数与本地不一致 → 判失败（完整性校验生效）')
+
+  // 小文件仍走原路径（一次 base64 -d >，无分块、无 wc）
+  const small = fakeRunner({})
+  const rs = await chunkApi.remoteWriteFileChunked(small, {}, '/remote/small.txt', '你好')
+  check(rs.ok === true && small.calls.length === 1 && /^base64 -d > /.test(small.calls[0].cmd),
+    '小文件仍是一次 base64 -d >（行为与 2.4.23 相同，无额外往返）')
+}
+
+console.log('D2 · writeBackExclude 的 glob 语义')
+{
+  const m = (pats, rel) => chunkApi.matchAnyGlob(pats, rel)
+  check(m(['_patch/**'], '_patch/draft.md') === true, '** 跨目录：_patch/** 命中 _patch/draft.md')
+  check(m(['_patch/**'], '_patch/a/b/c.txt') === true, '** 跨多层目录')
+  check(m(['_patch/**'], 'src/_patch.md') === false, '整路径锚定，不是子串匹配')
+  check(m(['**/*.tmp'], 'a/b/x.tmp') === true && m(['**/*.tmp'], 'x.tmp') === true, '**/*.tmp 命中任意层级（含根层）')
+  check(m(['*.log'], 'run.log') === true && m(['*.log'], 'a/run.log') === false, '* 不跨目录')
+  check(m(['docs/*.md'], 'docs/a.md') === true && m(['docs/*.md'], 'docs/sub/a.md') === false, 'docs/*.md 只匹配一层')
+  check(m(['a/b.txt'], 'a/b.txt') === true && m(['a/b.txt'], 'a/b.txt.bak') === false, '精确路径匹配')
+  check(m(['_patch/'], '_patch/x') === true && m(['_patch/'], '_patch') === true, '结尾带 / 视为目录前缀')
+  check(m(['_patch/'], '_patch2/x') === false, '目录前缀不误伤同名前缀目录（_patch2）')
+  check(m(['?.md'], 'a.md') === true && m(['?.md'], 'ab.md') === false, '? 匹配单个字符')
+  check(m([], 'anything') === false && m(['', '  '], 'x') === false, '空规则不排除任何东西')
+  check(m(['a+b.md'], 'a+b.md') === true && m(['a+b.md'], 'aab.md') === false, '正则元字符按字面处理')
+}
+
+console.log('D3 · 推送失败对模型可见（工具报错）')
+{
+  // 真实 installFsWriteBridge：标记过的失败必须继续上抛
+  const { svc } = fakeFs()
+  api.installFsWriteBridge(svc, {
+    onWritten: () => { const e = new Error('本地镜像已写入成功，但同步到远端失败：/r/x.txt — ssh 断开'); e.dshRemoteSshWriteBack = true; throw e },
+  })
+  let caught = null
+  try { await svc.writeText({ targetKey: 'k', processPath: '/mirror/w1/a.md' }, 'data') } catch (e) { caught = e }
+  check(caught !== null, '标记过的写回失败会让 writeText 抛错（→ 工具报错 → 模型看得见）')
+  check(caught && /本地镜像已写入成功/.test(caught.message), '错误消息点明本地写入是成功的（模型不会以为本地也没写成）')
+  // 真实文案在源码里（断言实现，而不是断言测试自造的文本）
+  check(/remote_ssh_push 补推/.test(grab('async function mirrorWriteToRemote')), '真实错误文案给出补救路径（remote_ssh_push）')
+
+  // 未标记的异常仍然只告警（不改变工具行为）
+  const { svc: svc2 } = fakeFs()
+  const warns = []
+  api.installFsWriteBridge(svc2, { onWritten: () => { throw new Error('别的错') }, log: { warn: (m) => warns.push(m) } })
+  const ok = await svc2.writeText({ targetKey: 'k', processPath: '/m/a' }, 'y')
+  check(ok.after === 'y' && warns.length === 1, '未标记的异常仍只告警，写入结果照常返回')
+
+  // 接线：模式开关 + 护栏
+  check(/writeBackFailure: z\.string\(\)\.default\("error"\)/.test(src), '设置项 writeBackFailure 默认 "error"（可见）')
+  check(/DSH_REMOTE_SSH_WRITEBACK_FAILURE/.test(src), '环境变量可覆盖（现场应急用）')
+  check(/writeBack: z\.boolean\(\)\.default\(true\)/.test(src) && /writeBackExclude: z\.array\(z\.string\(\)\)\.default\(\[\]\)/.test(src),
+    '每个工作区有 writeBack / writeBackExclude（默认不改变旧行为）')
+  const body = grab('async function mirrorWriteToRemote')
+  check(/w\.writeBack === false/.test(body) && /matchAnyGlob\(w\.writeBackExclude, relPath\)/.test(body),
+    '写回前按工作区设置判断开关与排除（命中就完全不推送）')
+  check(/err\.dshRemoteSshWriteBack = true/.test(body) && /writeBackFailureMode\(\) !== "error"/.test(body),
+    '失败默认抛标记错误，可退回只记日志')
+  check(/settingsFace\.read\(\)\.workspaces/.test(body), '按镜像目录匹配工作区设置（不是全局一刀切）')
 }
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
