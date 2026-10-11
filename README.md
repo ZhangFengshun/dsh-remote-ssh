@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.19
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.20
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -140,6 +140,25 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 
 `remote_ssh_sync` 把远端拉进本地镜像目录，`remote_ssh_push` 把镜像改动推回远端（tar over ssh，批量高效）。
 
+**2.4.20 起同步是「有门槛的整树操作」**，顺序固定为 *体积哨兵 → 解包到临时目录 →（整树时）比对「只存在于镜像的文件」→ 原子替换*，任何一步失败都**不碰旧镜像**：
+
+| 参数 | 作用 |
+| --- | --- |
+| `paths` | 只同步这些子路径（相对远端根），例如 `["src","docs"]`。**局部同步只覆盖对应子路径，不删除镜像里任何其它文件。** |
+| `exclude` | 排除规则（相对远端根，支持 `*`），下推为 `tar --exclude=./x`，例如 `["data","*.log"]` |
+| `force` | 显式确认：跳过体积哨兵与「仅存在于镜像的文件」保护（确认要整树全量复制时才用） |
+| `maxBytes` | 本次同步的体积上限，覆盖工作区设置与默认 **2 GiB** |
+| `timeoutMs` | 本次同步的墙钟预算，默认 **10 分钟**（0 = 不限） |
+
+```json
+{ "workspaceId": "w_xxx", "paths": ["src"], "exclude": ["data", "*.log"] }
+```
+
+- **体积哨兵**：删除任何东西之前先 `du -sb -c -- <本次范围>`（15 秒预算，只测要同步的范围）。超过上限、探测超时、远端无 `du`、输出不可解析 —— **一律拒绝**，要求显式 `force: true`。默认上限 2 GiB（`syncMaxBytes` / 环境变量 `DSH_REMOTE_SSH_SYNC_MAX_BYTES` 可调）。
+- **镜像独有文件默认不删**：整树同步前比对旧镜像与拉取结果，发现「远端没有、镜像里有」的文件就拒绝并列出清单（最多 20 条），提示先 `remote_ssh_push` 补推，或确认放弃后加 `force: true`。插件自己写的 `.remote-ssh.json` 与占位 `README.md` 不算（按内容指纹识别）。
+- **`push` 不污染远端根**：始终排除 `.remote-ssh.json`（连接信息绝不推到远端），并排除插件写的占位 `README.md`（你自己写的同名文件不受影响）。
+- **镜像目录是"出站缓冲区"，不是远端快照**：agent 的 `write` 会同时写镜像与远端对应文件；`remote_ssh_push` 是这些改动的**回推通道**。要在会话里读远端最新内容请用「文件」页签或 `remote_ssh_cat` —— 镜像里的内容可能已经过期。
+
 ## 模型工具
 
 | 工具 | 用途 |
@@ -155,8 +174,8 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | `remote_ssh_mkdir` | 创建远程目录 |
 | `remote_ssh_delete` | 删除远程文件/目录 |
 | `remote_ssh_move` | 移动/重命名 |
-| `remote_ssh_sync` | 远端同步到本地镜像 |
-| `remote_ssh_push` | 本地镜像推送回远端 |
+| `remote_ssh_sync` | 远端同步到本地镜像（**整树**：可用 `paths`/`exclude` 收窄，体积超限会被拒，镜像独有文件默认不删） |
+| `remote_ssh_push` | 本地镜像推送回远端（自动排除插件自有的 `.remote-ssh.json` 与占位 `README.md`） |
 
 远程工作区会话中调用工具可免填 `profileId` 等连接参数；全部文件/命令类工具走持久 SSH 会话池 + 结果缓存，`remote_ssh_exec` 单命令实测 ≈15× 提速。
 
@@ -224,6 +243,9 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 刚发布就安装：`minimumReleaseAge` / `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` / 「No matching version」 | 供应链新鲜度策略，分两层：① **npm 元数据传播**通常 1–5 分钟（`npm view` 看不到新版本就属于这层）；② **DSH Desktop 插件管理器走 pnpm**，其 `minimumReleaseAge` 窗口**实测为 24 小时** —— 新版本发布后约一天内，管理器安装会被策略拦下（日志在 `<profile>/.plugin-manager/logs/*/pnpm.log`，里面会打印 cutoff 时间）。等到窗口过去重试即可 |
 | **换一台电脑后，远程工作区的文件夹图标上没有本机看到的地球角标** | 该角标是客户端半边的 DOM 装饰（壳层工作区行只有固定文件夹原语，没有 per-workspace 图标 API），成立前提是：客户端半边已加载 → 宿主能返回远程工作区 → 行文本/属性与工作区标题匹配 → 壳层 DOM 结构一致 → **角标颜色在该主题下可见**。2.4.17 起：颜色改为取文件夹图标自身的计算色（浅色/深色都可见，此前硬编码白色在**浅色主题**下不可见）、匹配做空白归一化并兼容 `title`/`aria-label`、并加了自检。**排查**：在开发者工具 Console 执行 `window.__dshRemoteSshGlobeStats(true)` —— 返回 `undefined` 说明客户端半边没加载（升级插件后硬刷新页面）；`remoteWorkspaces: 0` 说明宿主没返回工作区（查插件版本与 harness 兼容性）；`remoteWorkspaces > 0` 而 `globesInDom: 0` 说明标题或 DOM 没匹配上（对照输出里的 `titleSamples` 与侧边栏实际显示文字）。 |
 | `remote_ssh_push` / `remote_ssh_sync` 明明推送成功却报 `returned invalid output` | 2.4.13 起已修复：这两个工具共用的 output schema 把 `error` 标成必填、成功路径又返回未声明的 `remotePath`/`mirrorPath`，于是**只有成功会报错**（失败路径反而合法）。现在 schema 声明两个路径字段、`error` 改为可选，成功路径也带 `error: ""`；全文件所有 output schema 的 `error` 一并改为可选 |
+| 同步被拒：「超过同步上限」/「无法在 15 秒内确认远端体积」 | 2.4.20 起的**体积哨兵**：删除任何东西之前先量体积，默认上限 **2 GiB**。远端根是「代码 + 数据集」的混合目录时这是常态。三条路：① 用 `paths: ["src"]` 只同步需要的子路径（推荐）；② 用 `exclude: ["data"]` 排掉大目录；③ 确实要整树复制就带 `force: true`。上限本身可用工作区字段 `syncMaxBytes` 或环境变量 `DSH_REMOTE_SSH_SYNC_MAX_BYTES` 调整 |
+| 同步被拒：「将删除 N 个只存在于镜像、远端没有的文件」 | 这是**数据丢失防线**：镜像里那批文件（常见于 >4 MiB 的写入没能推回远端、或某次 push 失败）在整树替换时会消失。先 `remote_ssh_push` 把它们补推到远端，或确认放弃后带 `force: true` 重试。插件自己的 `.remote-ssh.json` 与占位 `README.md` 不计入这个清单 |
+| 同步很久不返回怎么办 | 2.4.20 起同步/推送有墙钟预算（默认 10 分钟，`timeoutMs` 可调，0 = 不限），到点自动终止两端进程且**不动旧镜像**。旧版本（≤2.4.19）没有超时，只能杀进程 |
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |
 
@@ -248,7 +270,7 @@ Shell wrapper（`~/.dsh/remote-ssh/dsh-remote-shell[.cmd]`）检测工作区 `.r
 已知限制：
 
 - 集成终端（`ssh -tt`）与远端其它进程改动的文件依赖 TTL + 复验兜底，最多 **5 秒**陈旧；
-- **agent 的 `read` 仍读本地镜像**：2.4.14 起 `write`/`edit` 会同步到远端，但若文件在远端被其它人改动，agent 读到的是镜像里的旧内容（用 `remote_ssh_sync` 重新拉取镜像即可）；
+- **agent 的 `read` 仍读本地镜像**：2.4.14 起 `write`/`edit` 会同步到远端，但若文件在远端被其它人改动，agent 读到的是镜像里的旧内容（用 `remote_ssh_sync` 重新拉取镜像即可；2.4.20 起该操作有体积哨兵与「镜像独有文件」保护，正常镜像不会被误拦）；
 - `/sidebar/file` 下载池化路径有效上限约 **6.29MB**，更大文件自动退回一次性连接下载（可成功，多一次重连开销）；
 - 二进制内容伪装成文本扩展名时会多一次 base64 回退往返（结果正确）。
 

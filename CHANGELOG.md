@@ -2,6 +2,26 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.20] — 同步不再「先删后取」：体积哨兵 + 临时目录原子替换 + 范围控制 + push 不再污染远端根
+### 修复
+- **`remote_ssh_sync` 先 `rm -rf` 镜像、再全树拉取 → 拉取失败会销毁只存在于镜像的文件（issue [#20](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/20)，2026-10-10 SundaeYAGO 报）**：旧顺序是「`rm(mirrorPath,{recursive,force})` → `tar cf - -C <远端根> . | tar xf - -C <镜像>`」，**删除发生在任何成功证据之前**。而镜像里完全可能存在「只存在于本地」的文件：agent 的 `write` 超过 `MAX_BYTES`（4 MiB）时**本地镜像写入已成功**、`remoteWriteFile` 却拒绝推送（宿主侧只有一行 warn，模型侧完全不可见），此时一次 sync（哪怕随后失败）就把这份唯一副本永久删掉。报告作者把真实函数抽出来配真实子进程、在有界 fixture 上复现，并明确区分「实测」与「46 G 规模的推断」；本版按该报告建议修复：
+  - **新不变式**：**体积哨兵 → 解包到临时目录 →（整树时）比对「只存在于镜像的文件」→ 原子替换 → 恢复占位文件**。任何一步失败，旧镜像都原样保留，错误信息里明确写「本地镜像未改动」。
+  - **临时目录 + 原子替换**：新内容先解到同级 `.dsh-sync-tmp-<basename>-<stamp>-<pid>/`，`tar` 两端退出码都为 0 才 `rename` 替换（旧目录先挪成 `.dsh-sync-old-*`，替换失败自动回滚并说明回滚结果）；成功后补写 `.remote-ssh.json` **与占位 `README.md`**（旧实现里前者由调用方补写、后者**没人补** —— 一次 sync 后镜像根说明文件就永久消失）；中断残留的 tmp/old 目录在下次同步时按 1 小时年龄清理。
+  - **新增「仅存在于镜像的文件」保护**：整树替换前用 `scanMirrorOnly()` 比对旧镜像与临时目录（跳过插件自有的 `.remote-ssh.json` 与按首行指纹识别的占位 README；8 秒 / 2 万条目预算），一旦发现本地独有文件就**默认拒绝**，并把清单（最多 20 条，`onlyMirror` / `onlyMirrorTotal` 字段）回传给模型；拒绝理由给两条出路 —— ① 先 `remote_ssh_push` 补推；② 确认放弃后带 `force: true` 重试。预算内无法完成比对时同样保守拒绝。
+  - **体积哨兵（删除之前的唯一前置门槛）**：先 `du -sb -c -- <目标>`（**只测本次要同步的范围**：整树 = 远端根，`paths` = 那些子路径）并带 15 秒预算；超过上限（默认 **2 GiB**，可用 `syncMaxBytes` / `DSH_REMOTE_SSH_SYNC_MAX_BYTES` 调整）或探测超时 / 远端无 `du` / 输出不可解析，**一律拒绝**并要求显式 `force: true`（保守优先：宁可让用户多传一个参数，也不做不可撤销的全量复制）。
+  - **范围控制**：`remote_ssh_sync` / `remote_ssh_push` 新增 `paths`（只同步这些子路径，**局部同步只覆盖对应子路径、不删除镜像里任何其它文件**）、`exclude`（下推为远端/本地 `tar --exclude=./x`）；两者随工作区持久化（`WorkspaceSchema` 新增 `syncExclude` / `syncPaths` / `syncMaxBytes`，`updateWorkspace` 可写入），逐次调用可覆盖。越界规则（`../`、绝对路径、`~`、单独 `.`）在归一化时直接丢弃，不进 tar 参数。
+  - **命令形状经真实工具实测**：`--exclude=./data` / `--exclude=./*.log` 在真实 tar 上确实排除（`data/big.bin`、`top.log` 都不进镜像）、`tar cf - -C <根> src` 只打包该子路径、push 的 `--exclude=./README.md` 不把占位文件解到远端根、`du -sb -c -- <目录> | tail -n 1 | cut -f1` 在真实 GNU coreutils 上取到合计字节。
+  - **墙钟预算**：同步/推送新增 `timeoutMs`（默认 10 分钟，`DSH_REMOTE_SSH_SYNC_TIMEOUT_MS` 可调，0 = 不限）——旧实现的 46 G 拉取**既不会超时也无法从插件侧取消**，只能杀进程。
+- **`remote_ssh_push` 会把插件自己的文件解到远端根目录**：镜像根的 `README.md`（工作区创建时由插件写入）与 `.remote-ssh.json`（连接信息）此前会随 `tar cf - -C <镜像> .` 一起被解到**远端 `remotePath` 下**。现在 push **始终**排除 `.remote-ssh.json`（连接信息绝不推到远端），并按**内容指纹**（首行 `# 🌐 Remote Workspace / 远程工作区`）判定占位 README 后排除 —— 用户自己写的同名 `README.md` 不会被误伤（有专门的回归断言）。
+- **工具描述写明整树语义**：`sync` 的描述改为「**整树**拉取、可用 paths/exclude/force、远端超过上限会被拒、镜像独有文件默认拒绝删除」，并加一句「**读远端文件请用文件面板或 `remote_ssh_cat`，不要用 sync**」——旧描述的「把远端文件同步到本地镜像目录」完全没有体积与破坏性的暗示，这正是 issue #20 现象一的诱因之一。
+- **`armPipeTimeout` 不 `unref()`**（实现过程中由测试抓到）：`unref` 过的定时器在事件循环空转时会被跳过，而「两端进程都卡住、没有其它句柄」恰恰是最需要它触发的场景 —— 预算到点必须真的能终止管道（`done` 结束后立即 `clearTimeout`）。
+- 顺带：被拒/失败路径不再有任何"先删后写"步骤；`remoteSyncDown` 的签名加了 `runner`（体积探测走池化 SSH 会话）与 `opts`，四处入口（2 个模型工具 + 2 个 HTTP API）统一经 `syncOptsFrom(ws, args)` 组装参数。
+
+### 测试
+- 新增 `tests/sync-safety.test.mjs`（**86 条断言**）：抽出真实实现区（常量 + helpers + `remoteSyncDown`/`remoteSyncUp`），注入真实 fs 与可编排的假 `spawnOne`/假 runner，逐条验证 —— ① 哨兵在任何 `rm` 之前（记录 `rm` 调用序列断言为空）、超限/超时/不可解析三种拒绝、`force` 跳过、`maxBytes` 逐次覆盖、`paths` 时只探测子路径；② 失败不毁镜像（ssh 退出码、本地解包退出码、墙钟超时三种，`keep.txt` 逐条断言仍在 + tmp 清理 + 无 `.dsh-sync-old-*` 残留）；③ 整树成功后镜像 = 远端树、`.remote-ssh.json` 与占位 README 恢复、远端自带 README.md 时不被覆盖、解包目标是临时目录；④ 「仅存在于镜像」拒绝（回到清单、两条出路）与 `force` 时的显式放弃；⑤ push 排除 `.remote-ssh.json` 与占位 README、**不**排除用户自己的 README.md、tar 选项在操作数之前、失败时不清缓存；⑥ 越界 `exclude`/`paths` 丢弃与 `--exclude=./x` 精确形态；⑦ 选项组装（逐次参数 > 工作区字段）与 `updateWorkspace` 写入三个字段；⑧ 静态防线（`remoteSyncDown` 里不存在 `rm(mirrorPath)`、哨兵 < 解包 < 比对 < 替换的文本顺序、schema/参数/描述/四处入口与旧签名清零）。
+- `tests/tool-output-schema.test.mjs`（21 条，+4）：改为使用同一份实现区抽取，`remoteSyncDown` 传入体积探测桩；新增断言 `bytes`/`paths`/`onlyMirror`/`onlyMirrorTotal` 都在 `syncOutput.schema` 里（`additionalProperties: false` 会拒未声明字段 —— 这正是 issue #14 的教训）。
+- 全套 **21 个文件 864 条断言**通过（原 20 个文件 774 条）。
+
 ## [2.4.19] — 认证失败不再"答非所问"：先给一手证据（私钥文件不存在 / 远端允许交互式认证），再给登录横幅降噪
 ### 修复
 - **「连接失败：公钥认证失败」把真实根因埋在二维码横幅里（issue [#19](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/19)，2026-10-03 jackie2455 报）**：用户贴出的「测试输出」里真正的根因只有一行 —— `Warning: Identity file "…\id_rsa.cloud_and_wsl" not accessible: No such file or directory.`（**配置的私钥文件根本不存在**），而它被两件事埋掉了：① 这行是 `Warning:` 而不是 `debug1:`，正好落在 `testConnection` 的 `-v` 诊断过滤器之外（过滤器只捞 `debug1: Offering public key|Trying private key|…`）；② 服务端 `/etc/ssh/banner.txt` 的**预认证登录横幅**（腾讯云的扫码二维码 ASCII 画）被拼进了「原始信息」的 300 字截断窗口，把关键行挤了出去 —— 用户因此判断成"是扫码导致的连接失败"。现在认证类失败按**证据优先**重排：

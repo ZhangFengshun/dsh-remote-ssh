@@ -46,7 +46,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.19
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.20
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -140,6 +140,25 @@ Returns `{ ok, exitCode, stdout, stderr, error, truncated, isTimeout }` — e.g.
 
 `remote_ssh_sync` pulls the remote tree into the local mirror; `remote_ssh_push` sends mirror changes back (tar over ssh, batched).
 
+**Since 2.4.20 sync is a guarded whole-tree operation.** The order is fixed: *size sentinel → extract into a temp directory → (whole-tree) compare "mirror-only files" → atomic swap*. If any step fails, the old mirror is left untouched.
+
+| Parameter | Effect |
+| --- | --- |
+| `paths` | Only sync these sub-paths (relative to the remote root), e.g. `["src","docs"]`. **A partial sync only overwrites those sub-paths and deletes nothing else in the mirror.** |
+| `exclude` | Exclude rules (relative to the remote root, `*` supported), pushed down as `tar --exclude=./x`, e.g. `["data","*.log"]` |
+| `force` | Explicit confirmation: skip the size sentinel and the mirror-only-file guard (only when you really mean a whole-tree copy) |
+| `maxBytes` | Size limit for this sync, overriding the workspace setting and the **2 GiB** default |
+| `timeoutMs` | Wall-clock budget for this sync, **10 minutes** by default (0 = unlimited) |
+
+```json
+{ "workspaceId": "w_xxx", "paths": ["src"], "exclude": ["data", "*.log"] }
+```
+
+- **Size sentinel**: before deleting anything it runs `du -sb -c -- <this scope>` (15 s budget, only the scope being synced). Over the limit, probe timeout, no `du` on the remote, unparsable output — **all refused**, requiring an explicit `force: true`. Default 2 GiB (`syncMaxBytes` field or `DSH_REMOTE_SSH_SYNC_MAX_BYTES`).
+- **Mirror-only files are never deleted silently**: before a whole-tree swap the old mirror is compared with the pulled result; if files exist locally that the remote does not have, the sync is refused with a list (up to 20), telling you to either `remote_ssh_push` them first or retry with `force: true`. The plugin's own `.remote-ssh.json` and placeholder `README.md` are recognised by content fingerprint and excluded from the list.
+- **`push` no longer pollutes the remote root**: `.remote-ssh.json` (connection details) is always excluded, as is the plugin's placeholder `README.md` — a `README.md` you wrote yourself is untouched.
+- **The mirror is an outbound buffer, not a remote snapshot**: the agent's `write` updates both the mirror and the corresponding remote file, and `remote_ssh_push` is the channel that carries such changes back. To read the current remote content inside a session use the Files tab or `remote_ssh_cat` — the mirror may be stale.
+
 ## Model Tools
 
 | Tool | Purpose |
@@ -155,8 +174,8 @@ Returns `{ ok, exitCode, stdout, stderr, error, truncated, isTimeout }` — e.g.
 | `remote_ssh_mkdir` | Create remote directory |
 | `remote_ssh_delete` | Delete remote file/directory |
 | `remote_ssh_move` | Move/rename |
-| `remote_ssh_sync` | Sync remote to local mirror |
-| `remote_ssh_push` | Push local mirror back to remote |
+| `remote_ssh_sync` | Sync remote to local mirror (**whole tree**: narrow it with `paths`/`exclude`, oversized roots are refused, mirror-only files are never deleted silently) |
+| `remote_ssh_push` | Push local mirror back to remote (the plugin's own `.remote-ssh.json` and placeholder `README.md` are always excluded) |
 
 In a remote-workspace session, `profileId` and other connection params can be omitted. All file/command tools run over the persistent SSH session pool + result cache; `remote_ssh_exec` measures ≈15× faster per command.
 
@@ -220,6 +239,9 @@ The plugin never patches DSH sources or injects into the profile dependency tree
 | Install right after a release fails with `minimumReleaseAge` / `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` / "No matching version" | Two layers of supply-chain freshness policy: ① **npm metadata propagation** (usually 1–5 minutes — if `npm view` cannot see the new version yet, this is the layer); ② the **DSH Desktop plugin manager installs with pnpm**, whose `minimumReleaseAge` window is **24 hours in practice** — for about a day after a release the manager refuses to install it (see `<profile>/.plugin-manager/logs/*/pnpm.log`, which prints the cutoff). Retry once the window has passed |
 | **On another computer the remote workspace folder icon has no globe badge that this machine shows** | That badge is a client-side DOM decoration (the shell's workspace rows only expose a fixed folder primitive — there is no per-workspace icon API), so it needs: the client half to be loaded → the host to return remote workspaces → the row text/attributes to match the workspace title → the shell DOM to be unchanged → **the badge colour to be visible in that theme**. Since 2.4.17 the colour is taken from the folder icon's own computed colour (visible in light and dark themes; it used to be a hard-coded white that was **invisible on a light theme**), matching normalises whitespace and also accepts `title`/`aria-label`, and a self-check was added. **Diagnose** by running `window.__dshRemoteSshGlobeStats(true)` in the devtools console: `undefined` means the client half did not load (upgrade the plugin and hard-refresh the page); `remoteWorkspaces: 0` means the host returned no workspaces (check plugin/harness compatibility); `remoteWorkspaces > 0` with `globesInDom: 0` means the title or DOM did not match (compare `titleSamples` with what the sidebar actually shows) |
 | `remote_ssh_push` / `remote_ssh_sync` report `returned invalid output` even though the push succeeded | Fixed in 2.4.13: their shared output schema marked `error` as required while the success path returned an undeclared `remotePath`/`mirrorPath`, so **only success failed** (failures validated fine). The schema now declares both path fields, `error` is optional, the success paths carry `error: ""`, and every output schema in the file treats `error` as optional |
+| Sync refused: "exceeds the sync limit" / "could not confirm the remote size within 15 s" | The **size sentinel** introduced in 2.4.20: it measures before deleting anything, with a **2 GiB** default limit — a code+datasets mixed remote root hits it routinely. Three ways out: (1) `paths: ["src"]` to sync just what you need (recommended); (2) `exclude: ["data"]` to drop large directories; (3) `force: true` if you really want the whole-tree copy. Tune the limit with the workspace `syncMaxBytes` field or `DSH_REMOTE_SSH_SYNC_MAX_BYTES` |
+| Sync refused: "will delete N files that exist only in the mirror" | That is the **data-loss guard**: those files (typically writes >4 MiB that never made it back, or a failed push) would vanish in a whole-tree swap. Run `remote_ssh_push` first, or retry with `force: true` to accept the loss. The plugin's own `.remote-ssh.json` and placeholder `README.md` are not counted |
+| A sync never returns | Since 2.4.20 sync/push have a wall-clock budget (10 minutes by default, `timeoutMs`, 0 = unlimited); on expiry both ends are terminated and the **old mirror is untouched**. Releases ≤2.4.19 had no timeout and could only be killed |
 | A command hangs forever | The 120s timeout discards the pooled session automatically; use `timeoutMs: 0` for long jobs and `remote_ssh_kill` at any time |
 | Large files are truncated | 4MB per read, ≈6.29MB on the pooled download path (larger files fall back to a one-shot connection); use `remote_ssh_exec` with `head`/`tail` to page through |
 
@@ -240,7 +262,7 @@ Remote reads and directory listings are cached host-side (read LRU 32 + listing 
 Known limitations:
 
 - Files changed from the integrated terminal (`ssh -tt`) or by other remote processes rely on TTL + revalidation and may be stale for up to **5 seconds**;
-- **The agent's `read` still reads the local mirror**: since 2.4.14 `write`/`edit` are mirrored to the remote, but if someone else changes the file remotely the agent reads the older mirror copy (run `remote_ssh_sync` to refresh the mirror);
+- **The agent's `read` still reads the local mirror**: since 2.4.14 `write`/`edit` are mirrored to the remote, but if someone else changes the file remotely the agent reads the older mirror copy (run `remote_ssh_sync` to refresh the mirror; since 2.4.20 that operation is guarded by the size sentinel and the mirror-only-file check, so a normal mirror is never blocked);
 - The pooled `/sidebar/file` download path has an effective limit of ≈**6.29MB**; larger files automatically fall back to a one-shot connection download (succeeds, with one extra reconnect);
 - Binary content masquerading with a text extension costs one extra base64 fallback round-trip (results are still correct).
 

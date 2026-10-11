@@ -152,8 +152,10 @@ check(changelog.includes('[2.4.19]') && /issues\/19|issue #19/.test(changelog), 
 check(/keyboard-interactive|扫码/.test(readme) && readme.includes('私钥文件不存在'), 'C14 README 故障排查补了「扫码/键盘交互」与「私钥文件不存在」')
 check(/keyboard-interactive|QR/.test(readmeEn) && /does not exist|not accessible/.test(readmeEn), 'C15 README_EN 同步')
 check(maintenance.includes('#19') || maintenance.includes('登录横幅'), 'C16 MAINTENANCE 记录了这次的诊断教训')
-check(pkg.version === '2.4.19', 'C17 package.json 版本号 = 2.4.19（当前 ' + pkg.version + '）')
-check(readme.includes('dsh-remote-ssh@2.4.19'), 'C18 README 安装命令指向 2.4.19')
+// 版本断言不再写死字面量（每发一版都要手改测试是测试自身的维护成本）：改为「package.json == CHANGELOG 顶部」
+const topVersion = (changelog.match(/^## \[(\d+\.\d+\.\d+)\]/m) || [])[1] || ''
+check(pkg.version === topVersion && /^2\.4\./.test(topVersion), 'C17 package.json 版本号 = CHANGELOG 顶部版本（' + pkg.version + ' / ' + topVersion + '）')
+check(readme.includes('dsh-remote-ssh@' + pkg.version), 'C18 README 安装命令指向当前版本 ' + pkg.version)
 
 console.log('\n结果: ' + pass + ' 通过, ' + fail + ' 失败')
 if (fail > 0) process.exit(1)
