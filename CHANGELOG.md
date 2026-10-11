@@ -2,6 +2,34 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.23] — Windows 上拉取非 ASCII 文件名被静默改写（`报告.csv` → `鎶ュ憡.csv`）；顺带给出旧乱码名的清理通道
+### 修复
+- **Windows 上 `remote_ssh_sync` 会把非 ASCII 文件名拉成乱码，且完全静默；随后一次 push 就把乱码名固化到远端（issue [#22](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/22)，2026-10-11 SundaeYAGO 报，1450 文件镜像里 7 个非 ASCII 名 7/7 中招、7/7 可逆）**。三方各自都没错，错在组合：
+  - **远端**：GNU tar 对较短的非 ASCII 名写的是**纯 ustar 头** —— `typeflag='0'`、GNU magic `"ustar  \0"`、名字字段直接放**裸 UTF-8 字节**，既没有 PAX 记录、也没有任何字符集声明（GNU tar 1.35 实测；`--format=pax` 才会写 `path=` 记录并改用 POSIX magic `"ustar\0"`）。
+  - **本地**：Windows 自带的 `C:\Windows\System32\tar.exe` 是 **bsdtar 3.8.8 / libarchive 3.8.8**，它按**本地 ANSI 代码页**（中文机器 = CP936/GBK）解码 ustar 名字字段 → `报告_2026Q1.csv` 变成 `鎶ュ憡_2026Q1.csv`，**退出码 0、stderr 为空**，文件内容完好，只有名字被改写。该构建**不支持 `--hdrcharset`**（`tar: Option --hdrcharset=UTF-8 is not supported`，退出码 1）—— 所以本地侧没有可用的开关。
+  - **magic 决定"静默"还是"报错"**：GNU magic 走静默转码路径；POSIX magic（PAX）会让 bsdtar 优先采用 `path=` 记录 —— 这正是修法的着力点。
+  - **修法**：让**远端**改用 PAX 输出。`remote_ssh_down` 的远端命令现在前置 `--format=pax --pax-option=delete=atime,delete=ctime,delete=mtime`，**并且** `cf` 改成 `-cf`（带横线 —— GNU tar 的"无横线旧式选项"只在首参生效，前面一旦有长选项，`cf` 会被当成文件名并报 `You must specify one of the '-Acdtrux'…`；`-cf` 同时更符合 POSIX、GNU/bsdtar/busybox 都认）。
+  - **体积代价为零（实测）**：GNU tar 的 pax 默认给**每个**文件都写 `mtime`/`atime` 记录，301 个 200 B 文件的树从 317,440 B 涨到 624,640 B（**+97%**）；加上 `delete=atime,delete=ctime,delete=mtime` 后，GNU tar 只为**真正需要**的条目写扩展头（实测 301 个条目里只有 1 个 `x` 记录，就是那个中文名），归档大小与 ustar **逐字节相同**（317,440 B）。
+  - **能力探测而不是猜版本**：每次会话对每个 profile 做一次廉价探针（`tar <args> -cf /dev/null /dev/null`，不遍历任何目录，结果缓存）：第一级要 `min` 变体，失败退到纯 `--format=pax`（例如 macOS 的 bsdtar 没有 `--pax-option`），再失败才退回原样并**明确告知**——在 Windows 上会乱码、请升级远端 GNU tar。默认只在 `win32` 启用（其它平台的 ANSI 代码页就是 UTF-8，本来不会乱码）；`DSH_REMOTE_SSH_SYNC_PAX=off|plain|min` 可强制覆盖。
+- **旧版本已经拉下来的乱码名，现在会被认出来**（而不是被当成"本地独有文件"拒绝整个同步）：整树同步在触发「仅存在于镜像的文件」保护时，会先做一次乱码配对 —— 把新树里每个非 ASCII 路径按 UTF-8 字节交给 **GBK 解码**（这正是 bsdtar 当年的行为），若结果与镜像里某个"独有文件"逐字符相同，就判定它是**旧乱码名**并给出 `鎶ュ憡_2026Q1.csv → 报告_2026Q1.csv` 这样的对应关系，提示两条出路：`repairNames: true` 让插件清理，或先在本地改回正确名再 push（能保住你在这份副本上做过的修改）。
+  - **只在本来就要拒绝的那条路径上扫描**（日常同步零成本）；**只有全部**镜像独有文件都被证明是乱码名时才放行 —— 混着真正的本地独有文件时仍然拒绝，绝不借"修复"之名删真文件（有专门断言）。
+  - 新增参数 `repairNames`（默认 false，逐次生效、不持久化）与结果字段 `repairedNames` / `mojibakeNames` / `notice`。局部同步（`paths`）不替换镜像，所以默认只**提示**乱码名存在，显式 `repairNames: true` 才删除并顺手清理空的乱码目录。
+- **顺带确认 push 方向本来就是对的**：本地 bsdtar **写**归档时会为非 ASCII 名写 PAX `path=` 记录，远端 GNU tar 解出来是正确名字（真实工具端到端断言）；`--hdrcharset` 这条路只堵在**读**的方向。
+### 测试
+- 新增 `tests/unicode-names.test.mjs`（**31 条断言**）：**不造假 tar** —— WSL 里的真实 `GNU tar 1.35`（与举报人的 Ubuntu 24.04 同版本）扮演远端，Windows 自带的真实 `bsdtar 3.8.8` 做本地解包，中间跑插件**真实的** `remoteSyncDown`/`remoteSyncUp`，而"远端命令"是拿插件生成的那条字符串**真的**交给 WSL 的 bash 去执行 —— 于是"生成了什么命令 → 归档是什么形状 → Windows 上落盘什么名字"整条链路一起被验证。
+  - **前提自检**：直接按 512 字节块解析归档，断言默认格式确实是"`typeflag='0'` + GNU magic `"ustar "` + 无 `path=` 记录"，PAX 格式确实是"`x` 记录 + `path=./报告_2026Q1.csv` + POSIX magic"（GNU tar 以后若改默认格式，这里会先失败）。
+  - **A**：默认（探针命中 → `min`）→ `实验数据/批次2.csv`、`报告_2026Q1.csv`、`ascii/plain.csv` 全部正确落盘、无乱码名、内容完好，且生成的远端命令确实带 PAX 前缀。
+  - **B（负向控制）**：`DSH_REMOTE_SSH_SYNC_PAX=off` + **同一个远端树** → 必须复现 `鎶ュ憡_2026Q1.csv`。这条保证测试真的能抓到回归，而不是"恰好没跑到那条分支"。
+  - **C**：旧乱码名迁移端到端（默认拒绝并点名对应关系；`repairNames: true` 放行并报 `repairedNames=1`；乱码名 + 真·本地独有文件同时存在时**仍然拒绝**且真文件完好）。
+  - **D**：反方向（本地 bsdtar 打包 → 远端 GNU tar 解包）中文名正确，且 2.4.22 的排除修复仍然有效（`.remote-ssh.json` 与占位 `README.md` 没有被推到远端）。
+  - 没有 WSL / WSL 里没有 GNU tar 时整体跳过（打印一行说明，不计失败）。
+- `tests/sync-safety.test.mjs` 103 → **138 条断言**：新增 I 段覆盖探针阶梯与缓存（第一级通过只探一次、失败退第二级、`off` 完全不探、强制 `min` 不看探针）、`mojibakeName` 单元（与举报人的 `报告_2026Q1.csv → 鎶ュ憡_2026Q1.csv` 逐字符一致；整条相对路径一起解码所以可整路径配对；纯 ASCII 返回 null）、整树乱码拒绝与 `repairNames` 放行、混合场景保护、局部同步的"默认只提示/显式才清理/空乱码目录一并清掉"，以及参数与输出 schema 的静态防线；体积探测断言改为只看 `du` 那一类调用（PAX 探针也走同一个 runner）。
+- `tests/tool-output-schema.test.mjs` 21 → **23 条**：`repairedNames` / `notice` / `mojibakeNames` 在成功与失败两条路径上都被 schema 声明（`additionalProperties: false` 会拒未声明字段）。
+- 全套 **22 个文件 / 962 条断言**通过（上一版 21 个文件 / 894 条）。
+### 说明
+- 升级到 2.4.23 **不会**自动修复已经乱码的镜像（那属于删除动作），首次整树同步会明确告诉你怎么做；不愿意让插件删的，按提示在本地改回正确名即可。
+- 这条 issue 也是"同一个 helper 不能跨 shell 边界"（2.4.22 的教训）的姊妹篇：**同一份字节流，两端对"名字该怎么解码"的默认假设不同**。凡涉及编码/引号/行尾这类**静默**差异，只能靠真实工具链路复现，合成 fixture 与桩断言都不算数 —— 已写进 `MAINTENANCE.md`。
+
 ## [2.4.22] — push 侧 `--exclude` 全部失效：同一个 helper 跨了 shell 边界（2.4.20 的回归）
 ### 修复
 - **`remote_ssh_push` 的排除规则一条都没生效，包括代码里写死的那两条（issue [#20](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/20) 重测，2026-10-11 SundaeYAGO 报）**：`syncTarExcludes()` 用 `shellQuote()` 把模式包成 POSIX 单引号 —— 这对 **sync 方向**是对的（结果被拼进**远端命令字符串**，由远端 shell 解释），但 **push 方向**把同样的字符串当 **argv 元素**交给本地 tar：argv 不经 shell，`--exclude='./x'` 里的引号于是成了模式的**字面字符**，匹配不到 `./x`。

@@ -39,6 +39,9 @@ const check = (cond, label) => { if (cond) { pass++; console.log('  ✓ ' + labe
 // ---- 抽出同步实现区：常量块 + `function syncErrText` … `remoteSyncUp` 结束 ----
 const constStart = src.indexOf('const SYNC_MAX_BYTES_DEFAULT')
 const constEnd = src.indexOf('\n', src.indexOf('const MIRROR_README_SENTINEL')) + 1
+const paxConstStart = src.indexOf('const SYNC_PAX_MIN_ARGS')
+const paxConstEnd = src.indexOf('\n', src.indexOf('const syncPaxCache')) + 1
+const paxPrefSrc = grab('function resolveSyncPaxPref')
 const regionStart = src.indexOf('function syncErrText(')
 const upIdx = src.indexOf('async function remoteSyncUp(')
 const upSrc = grab('async function remoteSyncUp')
@@ -47,12 +50,14 @@ if (constStart < 0 || regionStart < 0 || regionEnd <= regionStart) {
   console.log('  ✗ FAIL: 未能抽出同步实现区（常量 + syncErrText … remoteSyncUp）')
   process.exit(1)
 }
-const syncRegion = src.slice(constStart, constEnd) + '\n' + src.slice(regionStart, regionEnd)
+const syncRegion = src.slice(constStart, constEnd) + '\n' + src.slice(paxConstStart, paxConstEnd) + '\n' + paxPrefSrc + '\n' + src.slice(regionStart, regionEnd)
 const downSrc = grab('async function remoteSyncDown')
 const upSrcOnly = upSrc
 // 用**真实**的 shellQuote（而不是测试自己的近似实现）：issue #22 恰恰是"引号该不该加"的问题，
 // 用桩去断言桩没有意义。
 const realShellQuote = new Function('return ' + grab('function shellQuote'))()
+// 同理：乱码名预测也用真实实现（它决定"哪些文件算旧版本乱码"，用桩断言桩没有意义）
+const h0Moji = new Function('return ' + grab('function mojibakeName'))()
 
 const PROFILE = { id: 'p1', name: 'hpc-a', host: 'hpc-a.example.com', port: 22, user: 'user', keyPath: '/k' }
 const PLACEHOLDER_README = '# 🌐 Remote Workspace / 远程工作区\n\n- Profile: hpc-a\n'
@@ -81,6 +86,10 @@ async function materialize(root0, tree) {
 function leftovers(parent) {
   return readdirSync(parent).filter((n) => n.indexOf('.dsh-sync-tmp-') === 0 || n.indexOf('.dsh-sync-old-') === 0)
 }
+
+/** 只看体积探测那一类 runner 调用（PAX 能力探针也走 runner，issue #22）。 */
+const duCalls = (x) => x.runnerCalls.filter((c) => /du -sb -c --/.test(c.cmd))
+const paxCalls = (x) => x.runnerCalls.filter((c) => /^tar /.test(c.cmd))
 
 /** 构造被测函数：注入真实 fs + 可编排的假 spawnOne / 假 runner。 */
 function build(opts) {
@@ -126,6 +135,11 @@ function build(opts) {
 
   const runner = async (p, cmd, stdinData, maxBytes, split, timeoutMs) => {
     runnerCalls.push({ cmd, timeoutMs })
+    // PAX 能力探针（issue #22）：两条阶梯命令都走这里；o.pax === false 表示远端 tar 不支持
+    if (/^tar /.test(String(cmd))) {
+      const ok = o.pax !== false
+      return { ok: ok, stdout: "", stderr: ok ? "" : "tar: unrecognized option '--format=pax'", exitCode: ok ? 0 : 2 }
+    }
     if (o.probe) return o.probe
     return { ok: true, stdout: String(o.probeBytes === undefined ? 2048 : o.probeBytes) + '\n', exitCode: 0 }
   }
@@ -135,7 +149,7 @@ function build(opts) {
     'process', 'rm', 'mkdir', 'rename', 'cp', 'readdir', 'stat', 'readFile', 'writeFile', 'existsSync',
     'join', 'dirname', 'basename', 'spawnOne', 'readCollected', 'sshArgv', 'shellQuote', 'shellQuotePath',
     'clearCachesForProfile', 'remoteWorkspaceReadme',
-    syncRegion + '\nreturn { remoteSyncDown: remoteSyncDown, remoteSyncUp: remoteSyncUp, scanMirrorOnly: scanMirrorOnly, formatSyncBytes: formatSyncBytes, syncOptsFrom: syncOptsFrom, syncTarExcludes: syncTarExcludes, syncTarPaths: syncTarPaths };'
+    syncRegion + '\nreturn { remoteSyncDown: remoteSyncDown, remoteSyncUp: remoteSyncUp, scanMirrorOnly: scanMirrorOnly, formatSyncBytes: formatSyncBytes, syncOptsFrom: syncOptsFrom, syncTarExcludes: syncTarExcludes, syncTarPaths: syncTarPaths, mojibakeName: mojibakeName, scanMojibakePairs: scanMojibakePairs, probeRemotePax: probeRemotePax, syncPaxPrefix: syncPaxPrefix, resolveSyncPaxPref: resolveSyncPaxPref, syncPaxCache: syncPaxCache };'
   )(
     process, loggedRm, mkdir, rename, cp, readdir, stat, readFile, writeFile, existsSync,
     join, dirname, basename, spawnOne, readCollected,
@@ -144,6 +158,7 @@ function build(opts) {
     (p) => { cleared.push(p.id) },
     (n, rp) => '# 🌐 Remote Workspace / 远程工作区\n\n- Profile: ' + n + '\n- Root: ' + rp + '\n'
   )
+  fns.syncPaxCache.clear()   // 探针结果按 profile 缓存 —— 每个 build 从干净状态开始
   return { spawns, rmCalls, runnerCalls, cleared, terminated, runner, fns }
 }
 
@@ -154,7 +169,7 @@ console.log('A · 体积哨兵严格早于任何删除动作')
     const r = await h.fns.remoteSyncDown(null, h.runner, PROFILE, '~/proj-root', mirror, {})
     check(r.ok === false, '远端超过上限 → 拒绝')
     check(/超过同步上限/.test(r.error), '拒绝理由说明上限（实际：' + String(r.error).slice(0, 60) + '…）')
-    check(h.runnerCalls.length === 1 && /du -sb -c --/.test(h.runnerCalls[0].cmd), '先探测体积（du -sb -c）')
+    check(duCalls(h).length === 1 && /du -sb -c --/.test(duCalls(h)[0].cmd), '先探测体积（du -sb -c）')
     check(h.rmCalls.length === 0, '哨兵阶段**没有任何 rm 调用**（旧实现这时已经 rm -rf 过镜像了）')
     check(h.spawns.length === 0, '被拒时连 tar 都没有启动')
     check(existsSync(join(mirror, 'only-local.txt')), '镜像内容原样保留')
@@ -182,7 +197,7 @@ console.log('A · 体积哨兵严格早于任何删除动作')
   await withMirror({}, async (mirror) => {
     const h = build({ probeBytes: 5 * 1024 * 1024 * 1024, remoteTree: { 'src/a.txt': 'A' } })
     const r = await h.fns.remoteSyncDown(null, h.runner, PROFILE, '~/proj-root', mirror, { force: true })
-    check(h.runnerCalls.length === 0, 'force: true → 跳过探测')
+    check(h.runnerCalls.filter((c) => /du -sb/.test(c.cmd)).length === 0, 'force: true → 跳过体积探测')
     check(r.ok === true, 'force: true → 继续执行并成功（用户显式承担全量复制）')
     check(existsSync(join(mirror, 'src', 'a.txt')), 'force 时镜像被替换为远端内容')
   })
@@ -201,7 +216,7 @@ console.log('A · 体积哨兵严格早于任何删除动作')
   await withMirror({}, async (mirror) => {
     const h = build({ probeBytes: 1024, remoteTree: { 'src/a.txt': 'A' } })
     const r = await h.fns.remoteSyncDown(null, h.runner, PROFILE, '~/proj-root', mirror, { paths: ['src'] })
-    check(h.runnerCalls.length === 1 && /proj-root\/src/.test(h.runnerCalls[0].cmd), '有 paths 时只探测这些子路径，而不是整根（避免 46G 误伤）')
+    check(duCalls(h).length === 1 && /proj-root\/src/.test(duCalls(h)[0].cmd), '有 paths 时只探测这些子路径，而不是整根（避免 46G 误伤）')
     check(r.ok === true && Array.isArray(r.paths) && r.paths[0] === 'src', '局部同步回传 paths')
     check(existsSync(join(mirror, 'src', 'a.txt')), '局部同步把子路径写进镜像')
   })
@@ -254,7 +269,7 @@ console.log('B · 失败不毁镜像（临时目录 + 原子替换）')
       const down = h.spawns.find((s) => s.role === 'extract')
       check(down && down.argv[down.argv.length - 1] !== mirror, '解包目标是临时目录，不是镜像本身')
       const ssh = h.spawns.find((s) => s.role === 'ssh')
-      check(/tar cf - -C '~\/proj-root' \.$/.test(ssh.remoteCmd), '整树命令仍是 `tar cf - -C <root> .`（远端语义不变）')
+      check(/^tar( --format=pax( --pax-option=[^ ]+)?)? -cf - -C '~\/proj-root' \.$/.test(ssh.remoteCmd), '整树命令仍是 `tar -cf - -C <root> .`（远端语义不变，PAX 前缀可选）')
     }
   )
 }
@@ -355,7 +370,7 @@ console.log('E · 范围控制与越界丢弃')
     const h = build({ remoteTree: { 'src/a.txt': 'A' }, probeBytes: 100 })
     await h.fns.remoteSyncDown(null, h.runner, PROFILE, '~/proj-root', mirror, { exclude: ['data'] })
     const ssh = h.spawns.find((s) => s.role === 'ssh')
-    check(/^tar cf - --exclude='\.\/data' -C '~\/proj-root' \.$/.test(ssh.remoteCmd), '排除规则出现在 -C 之前、操作数仍是 "."')
+    check(/^tar( --format=pax( --pax-option=[^ ]+)?)? -cf - --exclude='\.\/data' -C '~\/proj-root' \.$/.test(ssh.remoteCmd), '排除规则出现在 -C 之前、操作数仍是 "."（PAX 前缀可选，见 I 段）；-cf 带横线（长选项后不能再用旧式 cf）')
   })
 }
 
@@ -469,6 +484,105 @@ console.log('H · 两个引用语境（issue #22）：push 走 argv 必须裸模
         'H-B 经真实 POSIX shell 解析后正好退化成裸模式（与 H-A 证明可用的形态一致）')
     }
   })
+}
+
+console.log('I · 远端 tar 的字符集方案 + 乱码名迁移（issue #22）')
+{
+  const MOJI = '鎶ュ憡_2026Q1.csv'          // 报告_2026Q1.csv 被 GBK 解码后的样子
+  check(h0Moji('报告_2026Q1.csv') === MOJI, 'I-1 乱码预测与举报人实测一致（报告_2026Q1.csv → ' + MOJI + '）')
+  const mp = h0Moji('实验数据/批次2.csv')
+  check(mp !== null && mp.length === 15 && mp.indexOf('/') === 6 && mp.endsWith('2.csv'),
+    'I-1 整条相对路径一起解码（子目录也参与；"/" 与扩展名照旧，故可整路径配对）')
+  check(h0Moji('plain-ascii.csv') === null, 'I-1 纯 ASCII 不参与（null）')
+  const weird = h0Moji('a\uFFFDb')
+  check(weird === null || typeof weird === 'string', 'I-1 含替换字符的名字不抛异常（返回 null 或字符串）')
+
+  // I-2 探针阶梯与缓存
+  const hA = build({})
+  check(await hA.fns.probeRemotePax(hA.runner, PROFILE, 1000) === 'min', 'I-2 阶梯第一级通过 → "min"（pax + 裁剪记录，零体积代价）')
+  check(paxCalls(hA).length === 1, 'I-2 第一级即成功 → 只探测一次（实际 ' + paxCalls(hA).length + '）')
+  check(hA.fns.syncPaxPrefix('min') === '--format=pax --pax-option=delete=atime,delete=ctime,delete=mtime ', 'I-2 min 前缀拼进远端命令')
+  await hA.fns.probeRemotePax(hA.runner, PROFILE, 1000)
+  check(paxCalls(hA).length === 1, 'I-2 结果按 profile 缓存（第二次不再探测）')
+
+  const hB = build({ pax: false })
+  check(await hB.fns.probeRemotePax(hB.runner, PROFILE, 1000) === 'none', 'I-3 远端 tar 不支持 --format=pax → "none"')
+  check(paxCalls(hB).length === 2, 'I-3 走完两级阶梯才放弃（实际 ' + paxCalls(hB).length + ' 次）')
+  check(hB.fns.syncPaxPrefix('none') === '', 'I-3 none → 前缀为空（退回原命令形状）')
+
+  // I-4 开关：off 完全不探测；强制 min 不看探针结果
+  await withMirror({}, async (mirror) => {
+    process.env.DSH_REMOTE_SSH_SYNC_PAX = 'off'
+    try {
+      const h = build({})
+      await h.fns.remoteSyncDown(null, h.runner, PROFILE, '~/proj-root', mirror, { force: true })
+      const ssh = h.spawns.find((s) => s.role === 'ssh')
+      check(paxCalls(h).length === 0, 'I-4 DSH_REMOTE_SSH_SYNC_PAX=off → 一次探针都不发')
+      check(/^tar -cf - /.test(ssh.remoteCmd), 'I-4 off → 远端命令保持旧形状（仅 -cf 带横线）')
+    } finally { delete process.env.DSH_REMOTE_SSH_SYNC_PAX }
+  })
+  await withMirror({}, async (mirror) => {
+    process.env.DSH_REMOTE_SSH_SYNC_PAX = 'min'
+    try {
+      const h = build({ pax: false })
+      await h.fns.remoteSyncDown(null, h.runner, PROFILE, '~/proj-root', mirror, { force: true })
+      const ssh = h.spawns.find((s) => s.role === 'ssh')
+      check(paxCalls(h).length === 0, 'I-4 强制 min → 不探测')
+      check(/^tar --format=pax --pax-option=delete=atime,delete=ctime,delete=mtime -cf - /.test(ssh.remoteCmd), 'I-4 强制 min → 命令带 PAX 前缀')
+    } finally { delete process.env.DSH_REMOTE_SSH_SYNC_PAX }
+  })
+
+  // I-5 整树：镜像里是乱码名、新树里是正确名 → 默认拒绝并说明，repairNames 放行
+  const mojiPath = h0Moji('实验数据/批次2.csv')
+  await withMirror({ [mojiPath]: 'DATA-B' }, async (mirror) => {
+    const h = build({ remoteTree: { '实验数据/批次2.csv': 'DATA-B' }, probeBytes: 100 })
+    const r = await h.fns.remoteSyncDown(null, h.runner, PROFILE, '~/proj-root', mirror, {})
+    check(r.ok === false, 'I-5 默认拒绝（不静默删掉看起来"本地独有"的文件）')
+    check(/乱码文件名/.test(r.error) && r.error.indexOf(mojiPath) >= 0 && r.error.indexOf('实验数据/批次2.csv') >= 0,
+      'I-5 拒绝理由点名「乱码名 → 正确名」的对应关系')
+    check(Array.isArray(r.mojibakeNames) && r.mojibakeNames[0] === mojiPath, 'I-5 回传 mojibakeNames（供宿主展示）')
+    check(existsSync(join(mirror, mojiPath)), 'I-5 被拒时镜像原样不动')
+  })
+  await withMirror({ [mojiPath]: 'DATA-B' }, async (mirror) => {
+    const h = build({ remoteTree: { '实验数据/批次2.csv': 'DATA-B' }, probeBytes: 100 })
+    const r = await h.fns.remoteSyncDown(null, h.runner, PROFILE, '~/proj-root', mirror, { repairNames: true })
+    check(r.ok === true && r.repairedNames === 1, 'I-5 repairNames: true → 放行并回传 repairedNames=1')
+    check(existsSync(join(mirror, '实验数据', '批次2.csv')), 'I-5 替换后镜像里是正确名')
+    check(!existsSync(join(mirror, mojiPath)), 'I-5 乱码名已随原子替换消失')
+  })
+
+  // I-6 混合场景：乱码名 + 真正本地独有的文件 → 仍然拒绝（不能借修复之名删掉真文件）
+  await withMirror({ [mojiPath]: 'DATA-B', 'only-local.txt': 'L' }, async (mirror) => {
+    const h = build({ remoteTree: { '实验数据/批次2.csv': 'DATA-B' }, probeBytes: 100 })
+    const r = await h.fns.remoteSyncDown(null, h.runner, PROFILE, '~/proj-root', mirror, { repairNames: true })
+    check(r.ok === false && r.onlyMirrorTotal === 2, 'I-6 真·本地独有文件仍在 → 即使带 repairNames 也拒绝')
+    check(/repairNames: true/.test(r.error), 'I-6 拒绝理由提示乱码名可一并清理')
+    check(existsSync(join(mirror, 'only-local.txt')), 'I-6 真文件没有被删')
+  })
+
+  // I-7 局部同步：不替换镜像 → repairNames 显式清理；否则只提示
+  await withMirror({ [mojiPath]: 'DATA-B' }, async (mirror) => {
+    const h = build({ remoteTree: { '实验数据/批次2.csv': 'DATA-B' }, probeBytes: 100 })
+    const r = await h.fns.remoteSyncDown(null, h.runner, PROFILE, '~/proj-root', mirror, { paths: ['实验数据'] })
+    check(r.ok === true && !r.repairedNames, 'I-7 局部同步默认不删任何东西')
+    check(/乱码文件名/.test(String(r.notice || '')), 'I-7 但会在结果里提示存在乱码名')
+    check(existsSync(join(mirror, mojiPath)), 'I-7 乱码名还在（需要显式 repairNames）')
+  })
+  await withMirror({ [mojiPath]: 'DATA-B' }, async (mirror) => {
+    const h = build({ remoteTree: { '实验数据/批次2.csv': 'DATA-B' }, probeBytes: 100 })
+    const r = await h.fns.remoteSyncDown(null, h.runner, PROFILE, '~/proj-root', mirror, { paths: ['实验数据'], repairNames: true })
+    check(r.ok === true && r.repairedNames === 1, 'I-7 显式 repairNames → 局部同步也清理乱码名')
+    check(!existsSync(join(mirror, mojiPath)), 'I-7 乱码名已删除')
+    check(existsSync(join(mirror, '实验数据', '批次2.csv')), 'I-7 正确名已写入')
+    check(!existsSync(join(mirror, '瀹為獙鏁版嵁')), 'I-7 空的乱码目录也被清掉')
+  })
+
+  // I-8 静态防线：开关/参数/输出 schema 都接上了
+  check(/repairNames: src\.repairNames === true/.test(src), 'I-8 syncOptsFrom 透传 repairNames')
+  check(/repairNames: \{ type: "boolean"/.test(src), 'I-8 工具参数暴露 repairNames')
+  const out = src.slice(src.indexOf('const syncOutput = {'), src.indexOf('register({', src.indexOf('const syncOutput = {')))
+  check(/mojibakeNames: \{ type: "array"/.test(out) && /repairedNames: \{ type: "number"/.test(out) && /notice: \{ type: "string"/.test(out),
+    'I-8 输出 schema 声明 mojibakeNames / repairedNames / notice')
 }
 
 console.log('G · 选项组装与持久化')

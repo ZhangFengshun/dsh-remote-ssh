@@ -37,7 +37,11 @@ const syncRegion = (() => {
   const upSrc = grab('async function remoteSyncUp')
   const regionEnd = upIdx >= 0 ? src.indexOf(upSrc, upIdx) + upSrc.length : -1
   if (constStart < 0 || regionStart < 0 || regionEnd <= regionStart) throw new Error('sync region not found')
-  return src.slice(constStart, constEnd) + '\n' + src.slice(regionStart, regionEnd)
+  // PAX 常量与开关（issue #22）在 MIRROR_README_SENTINEL 之后，单独切出来
+  const paxStart = src.indexOf('const SYNC_PAX_MIN_ARGS')
+  const paxEnd = src.indexOf('\n', src.indexOf('const syncPaxCache')) + 1
+  return src.slice(constStart, constEnd) + '\n' + src.slice(paxStart, paxEnd) + '\n' +
+    grab('function resolveSyncPaxPref') + '\n' + src.slice(regionStart, regionEnd)
 })()
 
 let pass = 0, fail = 0
@@ -167,6 +171,9 @@ console.log('C · schema 静态防线（这一类 bug 的通用护栏）')
   check(/const res = \{ ok: true, error: "", remotePath: remotePath \}/.test(src), 'push 成功路径带 error: ""')
   // issue #20 新增字段必须都在 schema 里（否则 additionalProperties:false 会把成功判成 invalid output）
   check(validate(syncOutput.schema, { ok: true, error: '', mirrorPath: '/m', bytes: 123, paths: ['src'] }).length === 0, 'issue #20 字段（bytes/paths）已声明')
+  check(validate(syncOutput.schema, { ok: true, error: '', mirrorPath: '/m', repairedNames: 2, notice: '已清理', mojibakeNames: ['x'] }).length === 0,
+    'issue #22 字段（repairedNames/notice/mojibakeNames）已声明')
+  check(validate(syncOutput.schema, { ok: false, error: '已拒绝同步：乱码文件名', mojibakeNames: ['a'] }).length === 0, 'issue #22 拒绝路径也带这些字段')
   check(validate(syncOutput.schema, { ok: false, error: 'x', onlyMirrorTotal: 2, onlyMirror: ['a'] }).length === 0, '被拒清单字段（onlyMirror/onlyMirrorTotal）已声明')
   // 反向自检：把历史的坏 schema 喂给校验器，必须报错
   const badSchema = { type: 'object', additionalProperties: false, properties: { ok: { type: 'boolean', required: true }, error: { type: 'string', required: true } } }
