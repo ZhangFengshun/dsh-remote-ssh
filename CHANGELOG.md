@@ -2,6 +2,25 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.21] — 填了 ProxyJump 的连接，内置「终端」页签不再一开就退出 255（`no argument after keyword "-j"`）
+### 修复
+- **配了 ProxyJump 的连接里，内置「终端」页签永远打不开（issue [#21](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/21)，2026-10-11 berries-tart 报）**：终端 wrapper（`~/.dsh/remote-ssh/dsh-remote-shell.js`）拼 ssh argv 时，用**位置插入**把 ProxyJump 塞进了 `-o` 与其取值之间：
+  ```js
+  const args = ['-tt', '-o', 'StrictHostKeyChecking=no', '-o', 'ExitOnForwardFailure=no', '-p', …];
+  if (j.proxyJump) { args.splice(2, 0, '-J', j.proxyJump); }   // 插点(2) 正好是 '-o' 的下一个位置
+  ```
+  实际命令行于是成了 `ssh -tt -o -J jump-host StrictHostKeyChecking=no …`：ssh 把 `-J` 当成 **`-o` 的关键字**（关键字比较前会小写化，所以报文里显示 `-j`），按 `readconf.c` 的解析直接报 `command-line line 0: no argument after keyword "-j"` 并退出 **255**。边界与举报人观察完全一致：只有"该连接填了 ProxyJump"才命中（清空该字段、或换不走跳板机的连接都正常），而模型工具那套远端操作走的是另一条 argv 构造路径（`-o ProxyJump=<值>`，正确）所以一直正常。本机用同版本 `OpenSSH_for_Windows_9.5p2` 复现出**逐字节相同**的报文。
+  现在改为**按顺序 push、选项之间不交叉**：`-tt` → 两个 `-o` 对 → `-J <跳板机>` → `-p` → `-i` → `user@host`；跳板机取值经 `String()` 原样透传（`user@host:2222` 形态不会被拆词，argv 不经 shell）。
+- **升级即生效**：wrapper 文件在每次插件加载时都会被**无条件重写**，所以升级 2.4.21 + 重启 DSH 就够了，不需要手动删 `~/.dsh/remote-ssh/` 下的旧文件。
+
+### 测试
+- `tests/wrapper-terminal.test.mjs` 从 16 条扩到 **29 条**：新增 ProxyJump 三个场景（基本场景 / `user@host:port` 原样透传 / 未配置时不得凭空多出 `-J` 的负向控制）、一条**结构化不变式**（每个 `-o` 必须紧跟自己的取值 —— 含 `=` 且不以 `-` 开头；`-J`/`-p`/`-i` 同理），以及一条**真实 ssh 的离线判据**：
+  - 用 `ssh -G`（只解析命令行与 config、**不建立连接**）跑 wrapper 实际生成的 argv，断言 exit 0 且配置转储里出现 `proxyjump jump-host`、`port 2222`、`stricthostkeychecking false` —— 即"ssh 真的吃下了这串 argv、且 ProxyJump 真的生效"，而不只是"没报错"；
+  - 配一条**负向控制**：把 `-J` 插回 `-o` 与取值之间，同一判据必须判失败并复现 `no argument after keyword "-j"` —— 证明这条判据自己就能抓住 issue #21；
+  - 本机没有可用 `ssh` 时该组断言打印跳过、不计入失败。
+- 这组断言之所以必要：**旧测试断言了 wrapper 的 argv，但没有任何场景设置 `proxyJump`** —— 分支从未被走过，于是坏形状一路绿灯发到了 2.4.20。教训写进 `MAINTENANCE.md`。
+- 全套 **21 个文件 877 条断言**通过（原 864 条）。
+
 ## [2.4.20] — 同步不再「先删后取」：体积哨兵 + 临时目录原子替换 + 范围控制 + push 不再污染远端根
 ### 修复
 - **`remote_ssh_sync` 先 `rm -rf` 镜像、再全树拉取 → 拉取失败会销毁只存在于镜像的文件（issue [#20](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/20)，2026-10-10 SundaeYAGO 报）**：旧顺序是「`rm(mirrorPath,{recursive,force})` → `tar cf - -C <远端根> . | tar xf - -C <镜像>`」，**删除发生在任何成功证据之前**。而镜像里完全可能存在「只存在于本地」的文件：agent 的 `write` 超过 `MAX_BYTES`（4 MiB）时**本地镜像写入已成功**、`remoteWriteFile` 却拒绝推送（宿主侧只有一行 warn，模型侧完全不可见），此时一次 sync（哪怕随后失败）就把这份唯一副本永久删掉。报告作者把真实函数抽出来配真实子进程、在有界 fixture 上复现，并明确区分「实测」与「46 G 规模的推断」；本版按该报告建议修复：

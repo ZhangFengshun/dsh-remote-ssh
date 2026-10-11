@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.20
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.21
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -246,6 +246,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 同步被拒：「超过同步上限」/「无法在 15 秒内确认远端体积」 | 2.4.20 起的**体积哨兵**：删除任何东西之前先量体积，默认上限 **2 GiB**。远端根是「代码 + 数据集」的混合目录时这是常态。三条路：① 用 `paths: ["src"]` 只同步需要的子路径（推荐）；② 用 `exclude: ["data"]` 排掉大目录；③ 确实要整树复制就带 `force: true`。上限本身可用工作区字段 `syncMaxBytes` 或环境变量 `DSH_REMOTE_SSH_SYNC_MAX_BYTES` 调整 |
 | 同步被拒：「将删除 N 个只存在于镜像、远端没有的文件」 | 这是**数据丢失防线**：镜像里那批文件（常见于 >4 MiB 的写入没能推回远端、或某次 push 失败）在整树替换时会消失。先 `remote_ssh_push` 把它们补推到远端，或确认放弃后带 `force: true` 重试。插件自己的 `.remote-ssh.json` 与占位 `README.md` 不计入这个清单 |
 | 同步很久不返回怎么办 | 2.4.20 起同步/推送有墙钟预算（默认 10 分钟，`timeoutMs` 可调，0 = 不限），到点自动终止两端进程且**不动旧镜像**。旧版本（≤2.4.19）没有超时，只能杀进程 |
+| **填了 ProxyJump 的连接，内置「终端」页签一开就退出（255，`no argument after keyword "-j"`）** | 2.4.21 起已修复：终端 wrapper 拼 ssh argv 时把 `-J` **插进了 `-o` 与其取值之间**，ssh 于是把 `-J` 当成 `-o` 的关键字（关键字小写化后就是报文里的 `-j`）并报「no argument」。升级到 **2.4.21** 并重启 DSH 即可（wrapper 每次加载都会重写，无需手动删 `~/.dsh/remote-ssh/` 下的文件）。旧版本的临时绕过：清空该连接的 ProxyJump（仅当目标机可直达时可行） |
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |
 

@@ -46,7 +46,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.20
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.21
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -242,6 +242,7 @@ The plugin never patches DSH sources or injects into the profile dependency tree
 | Sync refused: "exceeds the sync limit" / "could not confirm the remote size within 15 s" | The **size sentinel** introduced in 2.4.20: it measures before deleting anything, with a **2 GiB** default limit — a code+datasets mixed remote root hits it routinely. Three ways out: (1) `paths: ["src"]` to sync just what you need (recommended); (2) `exclude: ["data"]` to drop large directories; (3) `force: true` if you really want the whole-tree copy. Tune the limit with the workspace `syncMaxBytes` field or `DSH_REMOTE_SSH_SYNC_MAX_BYTES` |
 | Sync refused: "will delete N files that exist only in the mirror" | That is the **data-loss guard**: those files (typically writes >4 MiB that never made it back, or a failed push) would vanish in a whole-tree swap. Run `remote_ssh_push` first, or retry with `force: true` to accept the loss. The plugin's own `.remote-ssh.json` and placeholder `README.md` are not counted |
 | A sync never returns | Since 2.4.20 sync/push have a wall-clock budget (10 minutes by default, `timeoutMs`, 0 = unlimited); on expiry both ends are terminated and the **old mirror is untouched**. Releases ≤2.4.19 had no timeout and could only be killed |
+| **A connection with ProxyJump set: the built-in Terminal tab exits immediately (255, `no argument after keyword "-j"`)** | Fixed in 2.4.21: the terminal wrapper inserted `-J` **between `-o` and its value**, so ssh read `-J` as the keyword of `-o` (lowercased, hence `-j` in the message) and reported "no argument". Upgrade to **2.4.21** and restart DSH (the wrapper is rewritten on every plugin load, so nothing under `~/.dsh/remote-ssh/` needs deleting). Workaround on older versions: clear that connection's ProxyJump (only viable if the target host is directly reachable) |
 | A command hangs forever | The 120s timeout discards the pooled session automatically; use `timeoutMs: 0` for long jobs and `remote_ssh_kill` at any time |
 | Large files are truncated | 4MB per read, ≈6.29MB on the pooled download path (larger files fall back to a one-shot connection); use `remote_ssh_exec` with `head`/`tail` to page through |
 

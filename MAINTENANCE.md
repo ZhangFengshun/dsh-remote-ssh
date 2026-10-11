@@ -128,6 +128,21 @@ dsh plugin --profile desktop add @zhangfengshun/dsh-remote-ssh@<版本>
    推广为正式版本，**无需重新发布**。结论：**发布后先用"版本级 URL"确认，别急着重发**；
    重发只会得到 409。真正需要人工介入（OTP/网页批准）时，npm 会明确要求 one-time password。
 
+7. **改文档/版本号一律用编辑器工具，不要用 PowerShell 做文本往返（2026-10-11 踩到，一次废掉两个 README）**：
+   本机 DSH 的 `pwsh` 工具实际是 **Windows PowerShell 5.1**（`5.1.26100.9568`），它的
+   `Get-Content -Raw` **对没有 BOM 的文件按 ANSI 代码页（中文机器 = GBK）解码** —— 仓库里所有
+   `.md`/`.json` 都是 **UTF-8 无 BOM**，于是 `Get-Content -Raw` → `-replace` → `Set-Content -Encoding utf8`
+   这条"顺手改个版本号"的链路会把整篇中文读成乱码再写回：README.md / README_EN.md 全篇变
+   `锛?鈥?馃`，还额外带上 BOM（BOM 对 npm 无害，但**对裸 `JSON.parse` 的宿主是致命的**）。
+   纪律：
+   - 改文件用编辑器工具（`edit`/`write`，它们按 UTF-8 处理且有版本守卫）；**需要脚本批量替换时，
+     显式指定编码**（`Get-Content -Encoding UTF8` / `Set-Content -Encoding UTF8NoBOM`，PS 5.1 写
+     无 BOM 得用 `[System.IO.File]::WriteAllText($p,$t,(New-Object System.Text.UTF8Encoding($false)))`）。
+   - **改完必须核验**：① `git diff --stat` 看改动行数是否离谱（整篇重写 = 编码事故的信号）；
+     ② 文件头 3 字节不是 `EF BB BF`；③ 抽查是否出现 `锛|鈥|馃` 这类乱码样本。
+   - 出事后**不要手工修补**：`git checkout -- <文件>` 回到 HEAD，再用编辑器重做那几行改动
+     （本次 README 的两行改动就是这么重做的，实测 30 秒恢复干净）。
+
 ## 4. 归档会话的读取方法（以后还想翻历史）
 
 ```powershell
@@ -362,3 +377,26 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
   8. 举报人自己做了一版本地补丁（四个入口统一 deny-by-default + 环境变量放行）。回复时明确说明
      正式修复**不需要**那套环境变量（默认就有哨兵），并把他的思路（临时目录 + 原子替换、体积哨兵、
      范围下推、push 白名单）落进实现 —— 举报人给出可用方案时，优先评估并入而不是另起一套。
+- **🧩 argv 是有语法的：`-o` 与它的取值之间不能插任何东西（issue #21，2026-10-11；纪律级）**：
+  终端 wrapper 曾用**位置插入**给 ssh 加 ProxyJump ——
+  `args.splice(2, 0, '-J', j.proxyJump)`，而索引 2 正好是 `-o`（索引 1）的下一个位置，于是命令行成了
+  `ssh -tt -o -J jump-host StrictHostKeyChecking=no …`：ssh 把 `-J` 当成 `-o` 的关键字（关键字比较前
+  小写化 → 报文里显示 `-j`）→ `command-line line 0: no argument after keyword "-j"` → **退出 255**，
+  只要连接填了 ProxyJump，内置终端就永远打不开（2.4.18 起就坏了，一路发到 2.4.20）。四条纪律：
+  1. **顺序构造，不要位置插入**：`push` 出一段一段的"选项 + 取值"（或 `[opt, val]` 数组再摊平），
+     永远不要用 `splice(固定索引, …)` 往别人的对子里塞东西 —— 索引会随上下文漂移，而报错发生在
+     ssh 那边、离现场很远（用户只看到 255 与一句让人摸不着头脑的 `no argument after keyword "-j"`）。
+  2. **每个选项都要有配对断言**：`for (i) if (args[i] === '-o') assert(args[i+1] 含 '=' 且不以 '-' 开头)`。
+     这类不变式写一次就能守住后续所有新增选项（本次同时覆盖了 `-J` / `-p` / `-i`）。
+  3. **让真实工具当判据，而不是自己解释规则**：`ssh -G <argv>` 只解析命令行与 config、**不建立连接**，
+     于是"这串 argv 合不合法、ProxyJump 有没有真的生效"可以在离线、无凭据、无网络的情况下由 ssh 自己回答
+     —— 断言 `ssh -G` 的 exit 0 与转储里的 `proxyjump jump-host`；再配一条负向控制（把 `-J` 插回坏位置，
+     同一判据必须失败并复现原报文），证明判据本身有牙齿。本机 `OpenSSH_for_Windows_9.5p2` 与举报人同版本，
+     复现出的报文**逐字节相同**。
+  4. **测试断言了文件 ≠ 覆盖了分支**：`tests/wrapper-terminal.test.mjs` 早就把 wrapper 的 argv 断言得
+     很细（`-tt`、端口、密钥、`user@host`、远程命令），但**没有任何场景设置 `proxyJump`** —— 分支没被
+     走过，坏形状就一路绿灯。凡"由输入组合决定的 argv"，每种组合都要有场景；缺哪种组合，就在测试里
+     显式列出来（本次补了 3 个 proxyJump 场景 + 1 条结构不变式 + 1 条 ssh 离线判据）。
+  5. 找同类问题的手法：`Select-String -Pattern "splice\(|'-o'|StrictHostKeyChecking"` 把全仓 argv
+     拼接点列出来逐个核对 —— 本次确认插件自己的 `sshArgv()`（`opts.push("-o","ProxyJump="+…)`）写法正确，
+     只有 wrapper 这一处坏了，这也正好解释了举报人"模型工具正常、只有终端不行"的观察。

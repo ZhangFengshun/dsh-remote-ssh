@@ -1,10 +1,10 @@
 // 终端 wrapper 回归测试（issue #7）：验证生成的 dsh-remote-shell.js 在远程工作区里
 // 会把终端 cd 到工作区对应的远程目录（remotePath），而不是落在远程 $HOME。
-//
-// 做法：从 lib/index.js 提取真实的 wrapperJs 数组字面量并求值，得到**原样**的生成脚本；
-// 再用一个 CJS runner 桩掉 child_process，捕获实际 spawn 的 argv 与 stderr。
+// issue #21 补充：ProxyJump 分支此前**没有任何场景走过**，于是 args.splice(2,0,'-J',…) 把
+// ProxyJump 插进 '-o' 与其取值之间也没人发现 —— 所以下面除结构化断言外，还加了一条
+// 真实 ssh 的离线判据（`ssh -G`：只解析配置、不连网），让"ssh 会不会吃下这串 argv"由 ssh 自己回答。
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -163,6 +163,77 @@ console.log('场景 5b · 同上，校验 stderr 提示文案确实打印')
     check(/key-authenticated/.test(err), '附英文提示')
   } finally {
     rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+// ---- 结构不变式：'-o' 必须紧跟自己的取值，且取值不能是另一个选项 ----
+function checkOptionPairs(args, tag) {
+  let bad = []
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-o') {
+      const v = args[i + 1]
+      if (typeof v !== 'string' || v.startsWith('-') || !v.includes('=')) bad.push(`-o -> ${JSON.stringify(v)}`)
+    }
+    if (args[i] === '-J' || args[i] === '-p' || args[i] === '-i') {
+      const v = args[i + 1]
+      if (typeof v !== 'string' || v === '' || v.startsWith('-')) bad.push(`${args[i]} -> ${JSON.stringify(v)}`)
+    }
+  }
+  check(bad.length === 0, `${tag}：每个选项都紧跟自己的取值（${bad.length ? bad.join('; ') : '无交叉'}）`)
+}
+
+/** 用真实 ssh 做离线判据：`ssh -G` 只解析命令行/config、不建立连接。返回 { ok, stdout, stderr, skipped } */
+function sshConfigDump(args) {
+  const bin = process.env.DSH_TEST_SSH || 'ssh'
+  const probe = spawnSync(bin, ['-G'].concat(args), { encoding: 'utf8' })
+  if (probe.error) return { skipped: true, reason: String(probe.error.code || probe.error.message) }
+  return { ok: probe.status === 0, stdout: String(probe.stdout || ''), stderr: String(probe.stderr || ''), status: probe.status }
+}
+
+console.log('场景 6 · ProxyJump（issue #21 主场景：填了跳板机，终端立即退出 255）')
+{
+  const { spawns } = runScenario('proxy', { ...keyProfile, proxyJump: 'jump-host', remotePath: '~/work/my-project' })
+  const { args } = spawns[0]
+  check(spawns.length === 1, '只 spawn 一次（ssh）')
+  check(args.includes('-J') && args[args.indexOf('-J') + 1] === 'jump-host', '-J 与跳板机取值成对出现')
+  checkOptionPairs(args.slice(0, -1), '含 ProxyJump 的 argv')
+  check(args[args.length - 2] === 'wxq@hpc.example.org', '目标 user@host 仍是最后一个选项之后的位置')
+  check(args[args.length - 1].startsWith('cd "$HOME/work/my-project"'), '远程命令仍被追加（cd + 登录 shell）')
+  const idx = args.indexOf('-J')
+  check(idx > args.indexOf('ExitOnForwardFailure=no'), '-J 排在所有 -o 对之后（不插进任何 -o 与取值之间）')
+}
+
+console.log('场景 6b · ProxyJump 取值原样传递（user@host:port 形态）')
+{
+  const { spawns } = runScenario('proxy-full', { ...keyProfile, proxyJump: 'ops@jump.example.org:2222', remotePath: '~' })
+  const { args } = spawns[0]
+  check(args[args.indexOf('-J') + 1] === 'ops@jump.example.org:2222', '含 user@host:port 的取值原样透传（不经 shell、不会被拆词）')
+  checkOptionPairs(args.slice(0, -1), 'user@host:port 形态的 argv')
+}
+
+console.log('场景 6c · 没有 ProxyJump 时不得凭空多出 -J（负向控制）')
+{
+  const { spawns } = runScenario('no-proxy', { ...keyProfile, remotePath: '~/x' })
+  check(!spawns[0].args.includes('-J'), '未配置 ProxyJump 时不追加 -J')
+}
+
+console.log('场景 6d · 真实 ssh 的离线判据（ssh -G：解析命令行但不连网）')
+{
+  const { spawns } = runScenario('proxy-real', { ...keyProfile, proxyJump: 'jump-host', remotePath: '~/work/my-project' })
+  const raw = spawns[0].args
+  const argv = raw[raw.length - 1].startsWith('cd ') ? raw.slice(0, -1) : raw  // 去掉远程命令，只留 ssh 自己的选项
+  const dump = sshConfigDump(argv)
+  if (dump.skipped) {
+    console.log('  … 跳过（本机没有可用的 ssh：' + dump.reason + '）')
+  } else {
+    check(dump.ok && !/no argument after keyword/.test(dump.stderr), '真实 ssh 接受这串 argv（issue #21 的 255 已消失）')
+    check(/^proxyjump jump-host$/m.test(dump.stdout), 'ssh -G 确认 ProxyJump 真的生效（proxyjump jump-host）')
+    check(/^port 2222$/m.test(dump.stdout) && /^stricthostkeychecking false$/m.test(dump.stdout), '其余选项也按预期生效（port / StrictHostKeyChecking=no）')
+    // 负向控制：证明这个判据能抓到 issue #21 的坏形状（把 -J 插回 '-o' 与取值之间）
+    const broken = argv.slice()
+    broken.splice(2, 0, '-J', 'jump-host')
+    const bad = sshConfigDump(broken)
+    check(!bad.ok && /no argument after keyword/.test(bad.stderr), '负向控制：坏形状会被同一判据判为失败（no argument after keyword "-j"）')
   }
 }
 
