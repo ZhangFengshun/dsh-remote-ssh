@@ -487,3 +487,22 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
      （`env` 要靠 PATH 找 bash），所以验证"薄壳不依赖 PATH"要显式 `PATH=/nonexistent /bin/bash 脚本`；
      Windows 的 `ssh.exe` 在 stderr 是管道时会把报文写到**控制台**，`spawnSync` 捕获不到（真实终端是 pty，
      用户照常可见）—— 这类"测量方式造成的假象"要写在注释里，免得以后有人"顺手修好"。
+- **📦 装给自己用也要走一遍沙箱（2026-10-11，2.4.24 发布后当场更新本机 desktop profile）**：
+  发布 ≠ 能装。DSH Desktop 的插件管理器用自带 pnpm（本机 11.7.0）跑 profile 内的安装，且带
+  **24 小时** `minimumReleaseAge` 供应链策略 —— 刚发布的版本必然被拒。四条纪律：
+  1. **先沙箱，再动真 profile**：在 `~/.dsh/profiles/<临时名>` 里放一个只有该依赖的 `package.json`
+     ＋ `pnpm-workspace.yaml`，用自带 node 跑 `runtime\pnpm\bin\pnpm.cjs install`（本机 787 ms 装完），
+     确认版本、文件清单、以及**与仓库 HEAD 逐文件 SHA256 一致**，再动真 profile；事后删掉沙箱目录。
+  2. **A/B 两组都要跑**："不加放行 → 必须被拒（`ERR_PNPM_NO_MATURE_MATCHING_VERSION`）"＋"加放行 → 必须装成"，
+     否则无法区分"策略真的生效"与"策略根本没被应用"。本次 A 组的拒绝报文里的发布时间戳
+     （`2026-10-11T15:05:29.155Z`）还顺手校对了 npm 的发布时刻。
+  3. **`minimumReleaseAgeExclude` 的两种写法语义不同（pnpm 11.7 实测）**：`名@版本` 只被 **lockfile 校验**
+     匹配（所以 profile 里那条 `…@2.4.19` 能通过启动校验），而**解析新版本**这条路径只认**纯包名**
+     —— 钉住版本时，卸载旧版装新版会直接失败，日志看起来像"放行没写"。要么用纯包名（本次采用，
+     代价是该包不再受 24 小时窗口保护），要么安装时用 `--config.minimumReleaseAge=0` 临时关掉策略。
+  4. **收尾要按宿主的真实口径复验**：更新完再跑一次
+     `pnpm install --frozen-lockfile --config.minimumReleaseAge=1440`（等价于 DSH 每次启动的校验），
+     必须 `Already up to date` ＋ 退出码 0，否则下次启动会被策略拦下、插件直接不加载。
+     另外：`resources\runtime\bin\node.cmd` 的内容就是 `"%DSH_DESKTOP_NODE_EXECUTABLE%"` ——
+     那个环境变量在子进程里缺席时它展开成一对空引号（`'""' is not recognized`），
+     这是 issue #23 的现场实证，也说明"用自己的 `process.execPath`"是唯一不依赖宿主私有约定的来源。
