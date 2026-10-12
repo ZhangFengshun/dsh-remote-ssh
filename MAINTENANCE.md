@@ -168,6 +168,12 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
   （b）**结论的措辞要跟代码能交付的范围对齐**：2.4.24 的 CHANGELOG/README 写了"不再依赖 PATH"，
   这对打包版是过强的 —— 2.4.25 把话收回来，并明确"在官方给出稳定 runtime 入口之前，插件侧到此为止"。
   CHANGELOG 里已经写下的过强结论，**要在下一版显式更正**，不能悄悄改文档了事。
+  （c）2.4.25 加的两条兜底（⑥ `%DSH_HOME%\dsh-runtimes\*`、⑦ `<安装目录>\resources\runtime\*`）在
+  **两台机器上都命中⑦、不是⑥** —— 插件所在进程的环境里**没有** `DSH_HOME`，所以⑥落空（DSH_HOME 是给
+  子进程/终端设的，不是宿主主进程的）。⑦ 依赖"进程可执行文件旁边就是运行时"这个**安装期事实**，比环境变量稳，
+  排序不该反过来。举报人还实测了：`…\resources\runtime\` 下有 `bin`/`cli`/`office-skills`/`pnpm`/`primary-runtime`
+  **五个目录，只有 `primary-runtime` 含 node** —— 所以"探测该层 + 逐候选 `existsSync` 验证 + 实例名不写死"
+  是必需的，硬编码任何实例名都会在下一次改名时脆掉。
 - **⚖️ 覆盖类护栏的默认值：按代价不对称来定，并且必须留"作废"通道（2026-10-12，issue #24 护栏 B）**：
   写回前检查远端是否被改过（记录 `size:mtime`，不一致就不推、只报告）。定这条护栏时的几个判断可复用：
   ① **默认开** —— 漏报一次 = 远端内容被静默覆盖（不可逆），误报一次 = 模型多走一步 `remote_ssh_push`（可恢复）；
@@ -183,6 +189,28 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
   这里踩到的隐性 bug 值得单独记：`settingsFace.read()` 此前只回 `profiles`/`workspaces`，
   于是 `read().writeBackFailure` 永远是 `undefined` —— **用户把设置写成 `"log"` 也不生效，只有环境变量管用，
   而且不报任何错**。标量偏好要用 `prefsScalar`（注意 `false` 是合法取值，不能用 `||` 回退）。
+- **🧾 包装脚本的每条分支都要有"实测"证据，而不是只有源码形状断言（2026-10-12，关 #23 前补测）**：
+  举报人复测通过但如实标注"本轮**没有**重跑负向控制"，我这边补了三条分支的实测（PATH 里只留
+  `System32` + `WindowsPowerShell\v1.0`，先确认 `where node` 退出码 1）：
+
+  | 场景 | 期望 | 实测 |
+  | --- | --- | --- |
+  | 写死路径有效、PATH 无 node（正例） | 越过往后正常起步 | 退出码 **0**，真的开出了 `Windows PowerShell` |
+  | 写死路径失效、PATH 无 node（负向控制） | 127 + 可操作提示 | 退出码 **127** + 那三行 `node not found` 提示 |
+  | 写死路径失效、PATH 有 node（回退） | 回退成立 | 退出码 **0** |
+
+  **踩到的坑（很容易被误读成产品 bug）**：造"写死路径失效"的副本时，我用
+  `-replace 'set "DSH_NODE=.*?"'` 一次替换了**三处** —— 连 `set "DSH_NODE="`（清空那行）和
+  `for /f … set "DSH_NODE=%%N"`（PATH 回退那行）也被换成了坏路径，于是脚本直接 `goto :run`
+  去执行不存在的文件，得到 cmd 的 `The system cannot find the path specified` + 退出码 **3**。
+  正确的做法是**只改那一行非空赋值**（按原编码读入 → `[string]::Replace` 精确替换那一行 → 按原编码写回；
+  该文件是 **UTF-8 无 BOM + CRLF**）。教训：**对照实验的"注入"本身要先验证注入成功**（打印改后的文件），
+  否则会把测量装置的故障当成被测对象的行为。
+- **📋 尚未被"行为"覆盖的清单（据实登记，别当成已验证）**：① 写回桥 `writeBackFailure: "log"` 的
+  **写路径端到端**（失败注入 + log 模式应返回成功）—— 测试里覆盖的是"标记错误会继续上抛"（行为）与
+  `writeBackFailureMode() !== "error"` 分支**存在**（源码形状），两者不等价；举报人在 2.4.25 复测时
+  验的是**读路径**（`getPrefs` 能读回 `"log"`），写路径**两边都没观测过**。下次动写回桥时把它做成行为断言
+  （把护栏 B 的判定与报告拆成可单测的纯函数），并单独发一版说明。
 
 - **🚦 DSH 0.2.0-rc.1 起的「插件兼容性门」（2026-09-28，最重要）**：harness 用插件自己声明的
   **DSH peer 版本范围**判定能否安装/激活；范围覆盖不到运行时版本时 `dsh plugin add` 直接拒绝
