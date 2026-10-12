@@ -321,7 +321,7 @@ const guardSrc = src.slice(
 if (!guardSrc) throw new Error('护栏 B 的代码未找到（freshnessFile … freshnessVerdict）')
 const guardApi = new Function(
   'join', 'readFileSync', 'writeFileSync', 'mkdirSync', 'shellQuotePath', 'syncErrText',
-  guardSrc + '\nreturn { freshnessGet, freshnessSet, freshnessForget, freshnessForgetProfile, remoteMtimeInfo, freshnessVerdict };'
+  guardSrc + '\nreturn { freshnessGet, freshnessSet, freshnessForget, freshnessForgetProfile, remoteMtimeInfo, freshnessVerdict, freshnessGuardPlan, applyFreshnessPlan, freshnessGuardCheck };'
 )(
   (await import('node:path')).join,
   readFileSync,
@@ -390,12 +390,14 @@ console.log('E3 · remoteMtimeInfo：三态由真实 stat 输出决定')
 
 console.log('E4 · 接线：查→推→记，且 push/sync/显式写之后忘掉记录')
 {
-  const iCheck = src.indexOf('freshnessGet(wrapperDir, p.id, remoteFile)')
+  const iCheck = src.indexOf('await freshnessGuardCheck({')
   const iWrite = src.indexOf('remoteWriteFileChunked(runPooled, p, remoteFile, content)')
   const iRecord = src.indexOf('freshnessSet(wrapperDir, p.id, remoteFile, after.stamp)')
   check(iCheck > 0 && iCheck < iWrite, '推送**之前**先查（顺序：查 → 推）')
   check(iRecord > iWrite, '推送**成功之后**才记录（顺序：推 → 记）')
-  check(/if \(verdict\.changed\)/.test(src), '被改过时走"不推送"分支')
+  const guardPlanSrc = grab('function freshnessGuardPlan')
+  check(/action: "block"/.test(guardPlanSrc) && /没有推送到远端/.test(guardPlanSrc) && /remote_ssh_sync 把远端拉下来比对/.test(guardPlanSrc),
+    '被改过时走"不推送"分支，且真实文案给出 sync / push 两条出路（文案在纯函数里，E5 直接断言它的内容）')
   check((src.match(/freshnessForgetProfile\(wrapperDir, p\.id\)/g) || []).length === 4,
     'push/sync 成功后都清记录（工具 + API 两条路各两处 = 4）')
   check(/freshnessForget\(wrapperDir, p\.id, args\.path\)/.test(src), 'API writeFile 成功 → 忘掉该路径的记录')
@@ -405,9 +407,119 @@ console.log('E4 · 接线：查→推→记，且 push/sync/显式写之后忘�
   check(/writeBackFreshness: z\.boolean\(\)\.default\(true\)/.test(src), '设置项 writeBackFreshness 默认**开**')
   check(/DSH_REMOTE_SSH_WRITEBACK_FRESHNESS/.test(src), '环境变量可强制开关')
   const body = grab('async function mirrorWriteToRemote')
-  check(/没有推送到远端/.test(body) && /remote_ssh_sync 把远端拉下来比对/.test(body),
-    '真实文案说明"没推送"，并给出 sync / push 两条出路')
-  check(/staleErr\.dshRemoteSshWriteBack = true/.test(body), '拦截用同一套标记错误（否则会被写入桥当普通错误吞掉）')
+  check(/applyFreshnessPlan\(plan\)/.test(body) && /if \(guard\.err\) throw guard\.err/.test(body) && /if \(!guard\.pushed\) return/.test(body),
+    '接线只剩三行：抛 / 拦 / 放行（判断都在纯函数里，行为断言见 E5）')
+  check(/err\.dshRemoteSshWriteBack = true/.test(grab('function applyFreshnessPlan')),
+    '拦截用同一套标记错误（否则会被写入桥当普通错误吞掉）')
+}
+
+console.log('E5 · 护栏 B 的处置：三态 × 两种失败模式（举报人标为"未覆盖"的那条行为）')
+{
+  // ① 判定 + 文案：纯函数，直接跑
+  const noRec = guardApi.freshnessGuardPlan('', null, 'error', '/r/a.txt')
+  check(noRec.action === 'push' && !noRec.logLine && !noRec.message, '没有记录 → 推，且不产生任何文案（不打扰）')
+  const same = guardApi.freshnessGuardPlan('100:200', { ok: true, exists: true, stamp: '100:200' }, 'error', '/r/a.txt')
+  check(same.action === 'push' && same.fail === false, '记录一致 → 推')
+  const unknown = guardApi.freshnessGuardPlan('100:200', { ok: false, exists: false, err: 'connection reset' }, 'error', '/r/a.txt')
+  check(unknown.action === 'push' && /无法确认远端状态/.test(unknown.logLine) && !unknown.message,
+    '读失败 → 仍然推，只有一行日志（"读不到"绝不等于"被改过"）')
+
+  const changedErr = guardApi.freshnessGuardPlan('79:1791796084', { ok: true, exists: true, stamp: '117:1791796207' }, 'error', '<ROOT>/_wbB/guard.txt')
+  check(changedErr.action === 'block' && changedErr.fail === true, '被改过 + error 模式 → 拦住，并标记"要让模型看见"')
+  check(changedErr.message.includes('79:1791796084') && changedErr.message.includes('117:1791796207'),
+    '报告同时给出"上次记录"与"现在读到"两个具体数值（接收方不用自己回头算）')
+  check(/远端文件: <ROOT>\/_wbB\/guard\.txt/.test(changedErr.message), '报告点明是哪个远端文件')
+  check(/没有推送到远端/.test(changedErr.message) && /remote_ssh_sync/.test(changedErr.message) && /remote_ssh_push/.test(changedErr.message),
+    '报告说明"没推送"并给出 sync / push 两条出路')
+
+  const changedLog = guardApi.freshnessGuardPlan('79:1791796084', { ok: true, exists: true, stamp: '117:1791796207' }, 'log', '/r/a.txt')
+  check(changedLog.action === 'block' && changedLog.fail === false && changedLog.message.length > 0,
+    'log 模式 → 仍然拦（不推送），但**不抛** —— 这就是"工具应当返回成功"那条行为')
+  const gone = guardApi.freshnessGuardPlan('1:2', { ok: true, exists: false }, 'error', '/r/gone')
+  check(gone.action === 'block' && /不存在/.test(gone.message), '远端这份已被删除 → 也拦（不静默重建）')
+
+  // ② 处置：把 plan 变成调用方的动作
+  const okPlan = guardApi.applyFreshnessPlan({ action: 'push' })
+  check(okPlan.pushed === true && okPlan.err === null, 'push → 照常推送、无错误对象')
+  const logPlan = guardApi.applyFreshnessPlan(changedLog)
+  check(logPlan.pushed === false && logPlan.err === null,
+    '★ log 模式被拦 → 不推送、但**不产生错误对象**（写回桥因此不抛，工具照常返回成功）')
+  const errPlan = guardApi.applyFreshnessPlan(changedErr)
+  check(errPlan.pushed === false && !!errPlan.err && errPlan.err.dshRemoteSshWriteBack === true,
+    '★ error 模式被拦 → 产生带标记的错误（否则写回桥会把它当普通错误吞掉）')
+  check(/没有推送到远端/.test(errPlan.err.message) && /guard\.txt/.test(errPlan.err.message), '抛出去的错误带着完整报告')
+  check(guardApi.applyFreshnessPlan(null).pushed === true, '没有 plan（护栏关着）→ 照常推送（负向控制）')
+
+  // ③ 整条链：注入假 runner + 真状态文件 —— 读记录 → stat → 判定 → 记日志 → 处置
+  const stateDir = mkdtempSync(join(tmpdir(), 'rssh-guard-'))
+  try {
+    const runnerOf = (out) => async () => ({ ok: out.ok, exitCode: out.ok ? 0 : 1, stdout: out.stdout || '', stderr: out.stderr || '', error: '' })
+    const logs = []
+    const sink = (m) => { logs.push(m) }
+    const call = (over) => guardApi.freshnessGuardCheck(Object.assign({
+      runner: runnerOf({ ok: true, stdout: '117 1791796207' }),
+      profile: { id: 'p1' }, stateDir, profileId: 'p1', remoteFile: '/r/guard.txt', mode: 'error', log: sink
+    }, over || {}))
+
+    guardApi.freshnessSet(stateDir, 'p1', '/r/guard.txt', '79:1791796084')
+    const r1 = await call()
+    check(r1.action === 'block' && guardApi.applyFreshnessPlan(r1).err !== null, '整链①：远端变了 + error 模式 → 拦下并报错')
+    check(logs.length === 1 && /护栏 B/.test(logs[0]), '整链①：日志里有一条"不推送（护栏 B）"')
+    check(logs.every((l) => typeof l === 'string' && l.length > 0), '整链①：日志都是非空字符串（不会往日志里塞对象）')
+
+    logs.length = 0
+    const r2 = await call({ mode: 'log' })
+    const a2 = guardApi.applyFreshnessPlan(r2)
+    check(r2.action === 'block' && a2.pushed === false && a2.err === null,
+      '整链②：同一条记录 + log 模式 → 不推送、不抛（本地写入照常成功）')
+    check(logs.length === 2 && /remote_ssh_push/.test(logs[1]),
+      '整链②：log 模式下长文案（含补救步骤）落进日志，而不是"连报告都没有"')
+
+    logs.length = 0
+    const r3 = await call({ runner: runnerOf({ ok: false, stderr: 'ssh: connect to host x port 22: Connection refused' }) })
+    check(r3.action === 'push' && guardApi.applyFreshnessPlan(r3).pushed === true, '整链③：stat 读失败 → 照常推送')
+    check(logs.length === 1 && /仍推送/.test(logs[0]), '整链③：但留一行"无法确认远端状态"的日志')
+
+    let called = 0
+    const r4 = await call({ remoteFile: '/r/never-seen.txt', runner: async () => { called++; return { ok: true, stdout: '1 2' } } })
+    check(r4.action === 'push' && called === 0, '整链④：没有记录 → 放行，且**不花那次 SSH 往返**（runner 一次都没被调用）')
+
+    guardApi.freshnessSet(stateDir, 'p1', '/r/guard.txt', '79:1791796084')
+    logs.length = 0
+    const r5 = await call({ runner: runnerOf({ ok: true, stdout: '79 1791796084' }) })
+    check(r5.action === 'push' && logs.length === 0, '整链⑤：远端没变 → 推，且不产生任何日志（安静路径）')
+  } finally {
+    rmSync(stateDir, { recursive: true, force: true })
+  }
+
+  // ④ 不变量（与上面的"具体输入 → 具体期望"互补：这里钉的是**矩阵上必须成立的关系**，
+  //    将来若有人为了"更安全"把未知态也拦下、或让模式渗进判据，这里会直接红）
+  {
+    const prevs = ['', '100:200']
+    const befores = [
+      { ok: true, exists: true, stamp: '100:200' },          // 没变
+      { ok: true, exists: true, stamp: '120:260' },          // 变了
+      { ok: true, exists: false, err: 'No such file' },      // 远端已消失
+      { ok: false, exists: false, err: 'connection reset' }  // 读失败
+    ]
+    let n = 0, onlyChangedBlocks = true, failOnlyOnError = true, quietWhenSame = true, applySelfConsistent = true
+    for (const prev of prevs) for (const before of befores) for (const mode of ['error', 'log']) {
+      n++
+      const v = guardApi.freshnessVerdict(prev, before)
+      const plan = guardApi.freshnessGuardPlan(prev, before, mode, '/r/x.txt')
+      if ((plan.action === 'block') !== v.changed) onlyChangedBlocks = false
+      if (plan.fail && mode !== 'error') failOnlyOnError = false
+      if (!v.changed && !v.unknown && (plan.logLine || plan.message)) quietWhenSame = false
+      const a = guardApi.applyFreshnessPlan(plan)
+      if ((a.err !== null) !== !!plan.fail) applySelfConsistent = false
+      if (a.err && a.err.dshRemoteSshWriteBack !== true) applySelfConsistent = false
+    }
+    check(n === 16, '不变量矩阵覆盖 ' + n + ' 组（2 种记录 × 4 种远端状态 × 2 种模式）')
+    check(onlyChangedBlocks, '不变量：**只有**"被改过"才可能拦（未知/未变一律推）')
+    check(failOnlyOnError, '不变量：fail 只出现在 error 模式（log 模式永不把失败交给模型）')
+    check(quietWhenSame, '不变量：远端没变时完全安静（不产生日志与报告）')
+    check(applySelfConsistent, '不变量：apply 与 plan 自洽，且错误一定带标记')
+  }
 }
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)

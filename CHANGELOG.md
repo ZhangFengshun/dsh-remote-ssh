@@ -2,6 +2,31 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.26] — 护栏 B 的「只记日志」变成可验证的行为（判定与处置抽成纯函数）
+### 修复 / 变更
+- **护栏 B 的判定、文案与处置从 `apply()` 的闭包里抽成三个可注入的纯函数**（issue [#24](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/24) 结案时举报人点出的"未覆盖"项）：
+  - `freshnessGuardPlan(prevStamp, before, mode, remoteFile)` —— 判定 + 两份文案（短日志行 / 长报告），三态 × 两种失败模式都是纯输入输出；
+  - `applyFreshnessPlan(plan)` —— 把 plan 落成调用方的动作 `{ pushed, err }`：拦 / 抛 / 放行与"带标记的错误"都在这里产生；
+  - `freshnessGuardCheck({ runner, profile, stateDir, profileId, remoteFile, mode, log })` —— 读记录 → `stat` 远端 → 判定 → 记日志；`runner` / `stateDir` / `log` 都可注入，所以测试能用假 runner 走完整条链。
+  - `mirrorWriteToRemote` 里的接线因此只剩三行（`throw guard.err` / 拦住则 return / 继续推送），**行为与 2.4.25 逐字一致**，区别只是"判断"从闭包搬到了能单测的地方。
+- **一处顺带的行为改进**：`writeBackFailure: "log"` 模式下被护栏拦下时，那份带补救步骤的长报告现在会**写进日志**（2.4.25 只记一行短提示 —— "只报告、不推送"实际上退化成了"连报告都没有"）。工具返回值不变：本地写入照常算成功、不报错。
+- 为什么值得单独发一版：2.4.25 对这段只有**源码形状断言**（`/if \(verdict\.changed\)/` 这类），而"log 模式下写入应当返回成功"是一条**行为**，此前**两边都没有观测过**（举报人复测时验的是读路径：`getPrefs` 能读回 `"log"`）。现在它是 `applyFreshnessPlan` 的返回值，可以直接断言。
+
+### 测试
+- `tests/fs-write-bridge.test.mjs` 98 → **126 条断言**，新增 E5 段：
+  - 判定与文案：没有记录 / 记录一致 / 读失败（必须放行且只记一行）/ 被改过（报告同时给出"上次记录"与"现在读到"**两个具体数值**、点明远端文件、给出 sync 与 push 两条出路）/ 远端已消失；
+  - 处置：push → `{pushed:true, err:null}`；**log 模式被拦 → `{pushed:false, err:null}`（不产生错误对象 = 写回桥不抛 = 工具返回成功）**；error 模式被拦 → 错误带 `dshRemoteSshWriteBack` 标记且带完整报告；`null` plan → 照常推送（负向控制）；
+  - **整链五例**（假 runner + 真实状态文件）：远端变了 + error 模式 → 拦下并报错、日志里有一条"不推送（护栏 B）"；同一条记录 + log 模式 → 不推送、不抛，且长报告落进日志；`stat` 读失败 → 照常推送 + 一行"无法确认远端状态"；**没有记录 → 不花那次 SSH 往返**（runner 调用计数为 0）；远端没变 → 推且**不产生任何日志**（安静路径）；
+  - **不变量矩阵**（2 种记录 × 4 种远端状态 × 2 种模式）：只有"被改过"才可能拦、`fail` 只出现在 error 模式、没变时完全安静、`apply` 与 `plan` 自洽且错误必带标记 —— 与"具体输入 → 具体期望"互补，防止将来有人为了"更安全"把未知态也拦下。
+- 另做了一次**独立校验**（脚本不进仓库）：从源码切片直接跑 30 组矩阵 + 7 条性质（含"模式不影响未变/未知的处置"、"拦下必有日志与报告"、"报告里的依据就是判据给出的 `why`"），并交叉核对 `freshnessGuardCheck` 与"读记录 → `stat` → `plan`"逐字段一致、日志条数符合模式 —— 0 处违反。
+- 全套 **23 个文件 / 1138 条断言**通过（上一版 23 个文件 / 1110 条）。
+
+### 升级
+```bash
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.26
+```
+纯逻辑搬迁 + 测试，无接口变化；照常重启 DSH 即可。
+
 ## [2.4.25] — 打包版 Desktop 上 node 解析五条候选全落空；写回前的远端新鲜度检查；这些开关终于能在设置面板里够到
 ### 修复
 - **打包版 Desktop 上「终端」仍然起不来：2.4.24 的五条候选在这台机器上一条都不成立（issue [#23](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/23) 第二轮验收，SundaeYAGO）**。举报人对着官方打包产物逐条核对：主进程 `execPath` 是 `DeepSeek Harness.exe`（第③条被"文件名得像 node"的守卫正确挡掉）、`DSH_DESKTOP_NODE_EXECUTABLE` 在子进程环境里根本不存在（第④条）、同目录也没有 node（第⑤条）→ 解析结果为空串。**所以 2.4.24 里"不再依赖 PATH"的说法对打包版是过强的**（它只在这台开发机的启动方式下成立）—— 本版把话收回来，并补两条兜底候选：
