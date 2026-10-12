@@ -2,6 +2,38 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.25] — 打包版 Desktop 上 node 解析五条候选全落空；写回前的远端新鲜度检查；这些开关终于能在设置面板里够到
+### 修复
+- **打包版 Desktop 上「终端」仍然起不来：2.4.24 的五条候选在这台机器上一条都不成立（issue [#23](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/23) 第二轮验收，SundaeYAGO）**。举报人对着官方打包产物逐条核对：主进程 `execPath` 是 `DeepSeek Harness.exe`（第③条被"文件名得像 node"的守卫正确挡掉）、`DSH_DESKTOP_NODE_EXECUTABLE` 在子进程环境里根本不存在（第④条）、同目录也没有 node（第⑤条）→ 解析结果为空串。**所以 2.4.24 里"不再依赖 PATH"的说法对打包版是过强的**（它只在这台开发机的启动方式下成立）—— 本版把话收回来，并补两条兜底候选：
+  - **第⑥条** `%DSH_HOME%\dsh-runtimes\*\dependencies\node\bin\node.exe`：`DSH_HOME` 是宿主自己导出的通用根（不是猜的私有目录），举报人也点名建议了这条。
+  - **第⑦条** `<应用安装目录>\resources\runtime\*\dependencies\node\bin\node.exe`（以及 `process.resourcesPath\runtime\*`）：取自 `process.execPath`，同属"自己的安装位置"这个既有事实来源。
+  - **运行时实例名不写死**（`dsh-primary-runtime` 只是当前的名字）：探测该层目录，`primary` 优先、其余按名排序，**逐个 `existsSync` 验证通过才采用**；用哪条、解析到什么，都写进那行日志（`终端 wrapper 使用的 node: …（来源：…）`）。
+  - **边界如实说清**：在官方给出稳定的 runtime 入口之前，插件侧到此为止。⑥⑦ 都落空时仍是那行可操作错误 + `nodePath` 设置（现在能在设置面板里填，见下）。
+- **写回可能静默覆盖远端已被改过的内容 → 新增护栏 B（写回前的远端新鲜度检查，默认开；issue [#24](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/24) 第二轮现场）**。举报人的现场是共享集群上最常见的那个"另一个写入者"——**自己刚跑完的作业**：作业写了远端，镜像还是旧版，agent 再写一次就把远端的改动静默覆盖。按他给的首选语义（只报告 + 不推送）实现：
+  - 推送成功后记录远端的 `size:mtime`（`~/.dsh/remote-ssh/writeback-mtimes.json`，profile → 远端路径）；下次推同一路径前复查，**不一致或远端这份已消失 → 不推送**，并报错说明"本地镜像已写入成功、只是没推到远端"，给出 `remote_ssh_sync`（拉下来比对）与 `remote_ssh_push`（确认以本地为准）两条出路。
+  - **只在远端自己的时间轴上自比，绝不与本地 mtime 比**：跨机时钟偏移、tar/base64 重写都会让两边不可比（举报人明确提示过这一点）。判据抽成纯函数 `freshnessVerdict` 单独验证。
+  - **读不到 ≠ 被改过**：`stat` 失败、ssh 抖动一律归为"状态未知"照常推送，只留一行日志 —— 把 flaky 连接变成"拦住写入"是错的；状态文件损坏同样当作没有记录。
+  - 记录是**"允许下次覆盖"的通行证**：显式写远端（`remote_ssh_write`、文件面板保存、API `writeFile`）之后忘掉该路径；`remote_ssh_push` / `remote_ssh_sync` 成功之后忘掉该连接的全部记录 —— 这也是被护栏拦下后的官方出路。
+  - 关掉它：设置 `writeBackFreshness: false`，或 `DSH_REMOTE_SSH_WRITEBACK_FRESHNESS=off`（回到"每次都无条件覆盖"，即 2.4.24 行为）。
+- **这些开关此前在界面上够不着，普通用户等于没有（同一份验收里的"可达性"部分）**。举报人指出 `nodePath` / `writeBackFailure` / `writeBack*` 在 `lib/client.js` 里 0 命中 —— 而 #23 的场景恰恰是"终端完全打不开、最需要一条自救路径"的那批用户。修法：
+  - 设置面板新增「写回与终端（进阶）」：`nodePath` 输入框、`writeBackFailure` 下拉（让模型看见 / 只写日志）、`writeBackFreshness` 勾选；每个远程工作区多一组"启用写回 + 写回排除"（护栏 A，占位示例就是验收里用过的 `_patch/, *.log, wbdeep/**`）。中英双语键齐备。
+  - 宿主侧新增 `getPrefs` / `savePrefs` / `updateWorkspaceGuards` 端点（字段白名单；`writeBackFailure` 只归一化成 `error` / `log` 两态）。
+  - **顺带修掉一个 2.4.24 的隐性 bug**：`settingsFace.read()` 只回 `profiles` / `workspaces`，于是 `read().writeBackFailure` 永远是 `undefined` —— 用户把设置写成 `"log"` 也不生效，只有环境变量管用。现在三个 face（新版 / 旧版 / 只读兜底）都回标量，并新增 `prefsScalar`（`false` 是合法取值，不能被当成"没设"而回退默认）。
+
+### 测试
+- `tests/wrapper-terminal.test.mjs` 59 → **69 条断言**：新增场景 11 直接造出**打包版桌面端**的进程画像（`execPath` 指向 `DeepSeek Harness.exe`、没有 `DSH_DESKTOP_NODE_EXECUTABLE`、同目录无 node），断言第⑥/⑦条能解析到真实存在的 node、显式 `nodePath` 仍然优先、`primary` 实例优先的确定性、目录不存在时探测返回空，以及**负向控制**（`execPath` 挪到不存在的树下且不给 `DSH_HOME` → 一条候选都解析不到，`bin === ''`）。
+- `tests/fs-write-bridge.test.mjs` 67 → **98 条断言**：护栏 B 判据真值表（没变 / `size:mtime` 变了 / 只有 size 变了 / 远端已消失 / **读失败必须放行** / 没有记录放行）、状态文件读写与 `forget` / `forgetProfile`（且不碰别的连接）、状态文件损坏与目录不存在时不抛也不挡、`remoteMtimeInfo` 三态由真实 `stat` 输出决定（命令形状与既有代码一致），以及"查→推→记"顺序与 push/sync/显式写之后的清理接线。
+- `tests/settings-ui-reachability.test.mjs`（新增）**37 条断言**：客户端真的有这些控件、10 个新 i18n 键在 zh/en 各定义一次、三个端点存在且只接受白名单字段、`updatePrefs` 在三个 face 都实现、`read()` 回标量且运行时判断读的正是它。
+- `tests/settings-compat.test.mjs` 48 → **54 条断言**：新增 `prefsScalar`（`false` 必须原样返回、volatile `.get()`、抛错跳过、`0` 不算空）。
+- **真实集群实测**（护栏 B 唯一新增的远端依赖）：在真实 SSH 集群上跑 `stat -c'%s %Y' <文件>` → `8 1633938245`（size 与 mtime 都在）；对不存在的路径 → `stat: cannot stat '…': No such file or directory`（退出码 1），正是判据里"远端已消失"那一态；远端 `stat` 的引号是本地化的弯引号，所以匹配只认 `No such file` 这一段。
+- 全套 **23 个文件 / 1110 条断言**通过（上一版 22 个文件 / 1026 条）。
+
+### 升级
+```bash
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.25
+```
+升级后**重启 DSH**（终端 wrapper 每次加载都会重写；设置面板新增的进阶区块也要重新加载客户端）。
+
 ## [2.4.24] — Desktop 终端再也起不来（wrapper 裸调 `node`）；写回桥推送失败对模型不可见
 ### 修复
 - **DSH Desktop 上集成「终端」页签 100% 打不开：wrapper 裸调 `node`（issue [#23](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/23)，2026-10-11 SundaeYAGO 报）**。生成出来的两个薄壳（`.cmd` / POSIX `sh`）此前都是裸名 `node "…/dsh-remote-shell.js"`，而**桌面端按设计不把自带 node 放进子进程 PATH**（举报人逐条引证官方源码与设计笔记：`packageManager` 的 JSDoc 明写只覆盖包操作、`installPrimaryRuntime` 明写不改 PATH、宿主自己是用**绝对路径**的 node 去跑 pnpm；`runtime\bin\node.cmd` 垫片依赖的 `DSH_DESKTOP_NODE_EXECUTABLE` 又恰在子进程环境的脱敏名单里）。于是 PATH 上没有 node 的机器（桌面端的主流状态）一开终端就是 cmd 的 `'node' is not recognized…` 并立刻退出 —— 与 SSH、密钥、跳板机全都无关。

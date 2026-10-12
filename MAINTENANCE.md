@@ -158,6 +158,32 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
 
 ## 5. 维护备忘
 
+- **📦 「在开发机上能解析」≠「官方打包形态能解析」（2026-10-12，issue #23 第二轮，最值得记的一条）**：
+  2.4.24 用 `process.execPath` / 同目录 node 等五条候选修 wrapper 的 node 解析，本机实测通过、测试也过，
+  但**官方打包版上五条全落空** —— 举报人对着产物逐条核对：主进程 `execPath` 是 `DeepSeek Harness.exe`、
+  `DSH_DESKTOP_NODE_EXECUTABLE` 不在子进程环境里、同目录无 node。教训有两条：
+  （a）**验收要造出目标形态的进程画像**，而不是只跑本机的真实值 —— `tests/wrapper-terminal.test.mjs`
+  场景 11 现在就是这样：伪造 packaged Desktop 的 `execPath` + 清掉环境变量 + 无同目录 node，
+  再断言兜底候选能解析到**真实存在**的文件，并留一条负向控制（全都不可用 → 空串 + 回退 PATH）。
+  （b）**结论的措辞要跟代码能交付的范围对齐**：2.4.24 的 CHANGELOG/README 写了"不再依赖 PATH"，
+  这对打包版是过强的 —— 2.4.25 把话收回来，并明确"在官方给出稳定 runtime 入口之前，插件侧到此为止"。
+  CHANGELOG 里已经写下的过强结论，**要在下一版显式更正**，不能悄悄改文档了事。
+- **⚖️ 覆盖类护栏的默认值：按代价不对称来定，并且必须留"作废"通道（2026-10-12，issue #24 护栏 B）**：
+  写回前检查远端是否被改过（记录 `size:mtime`，不一致就不推、只报告）。定这条护栏时的几个判断可复用：
+  ① **默认开** —— 漏报一次 = 远端内容被静默覆盖（不可逆），误报一次 = 模型多走一步 `remote_ssh_push`（可恢复）；
+  ② **只在远端自己的时间轴上自比**，绝不与本地 mtime 比（跨机时钟偏移、tar/base64 重写让两边不可比）；
+  ③ **"读不到"必须放行**（`stat` 失败/ssh 抖动归为"状态未知"，只留日志）—— 否则 flaky 连接就变成了拦截器；
+  ④ **记录要能被显式操作作废**（`remote_ssh_push` / `remote_ssh_sync` 成功、以及显式写远端之后清记录），
+  否则护栏会从"保护"变成"永久封锁"；⑤ 判据抽成纯函数（`freshnessVerdict`）单独测三态，而不是埋在 `apply()` 里。
+- **🔌 新设置字段的"可达性"清单（2026-10-12，issue #24 第二轮举报人指出）**：加了设置字段但没进设置面板，
+  对普通用户等于不存在（#23 的场景恰恰是"终端打不开、最需要自救"的那批人）。加字段时逐项过：
+  `PrefsSchema`/`WorkspaceSchema` → **三个 settings face 的 `read()` 都要回它** → 写入口（`updatePrefs` 在三个
+  face 都实现）→ 宿主端点（白名单字段）→ 客户端控件（`lib/client.js`）→ zh/en 双语键 → 测试
+  （`tests/settings-ui-reachability.test.mjs` 就是这条清单的沉淀）。
+  这里踩到的隐性 bug 值得单独记：`settingsFace.read()` 此前只回 `profiles`/`workspaces`，
+  于是 `read().writeBackFailure` 永远是 `undefined` —— **用户把设置写成 `"log"` 也不生效，只有环境变量管用，
+  而且不报任何错**。标量偏好要用 `prefsScalar`（注意 `false` 是合法取值，不能用 `||` 回退）。
+
 - **🚦 DSH 0.2.0-rc.1 起的「插件兼容性门」（2026-09-28，最重要）**：harness 用插件自己声明的
   **DSH peer 版本范围**判定能否安装/激活；范围覆盖不到运行时版本时 `dsh plugin add` 直接拒绝
   （`Plugin <name>@<v> is incompatible with dsh <runtime>: peerDependencies …`），已装的 bundle 也

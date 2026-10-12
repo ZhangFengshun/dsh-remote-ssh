@@ -306,5 +306,109 @@ console.log('D3 · 推送失败对模型可见（工具报错）')
   check(/settingsFace\.read\(\)\.workspaces/.test(body), '按镜像目录匹配工作区设置（不是全局一刀切）')
 }
 
+// ---------------------------------------------------------------------------
+// E · 护栏 B：写回之前的远端新鲜度检查（issue #24 第二轮验收）
+//
+// 举报人的现场：共享集群上最常见的"另一个写入者"是**你自己刚跑完的作业** —— 作业改了远端，
+// 镜像还是旧版，agent 再写一次就把远端内容静默覆盖了。判据按他的建议**只在远端自己的时间轴上
+// 自比**（不与本地 mtime 比，避开跨机时钟偏移与 tar/base64 重写），这里把该判据抽成纯函数验证。
+// ---------------------------------------------------------------------------
+const { existsSync } = await import('node:fs')
+const guardSrc = src.slice(
+  src.indexOf('function freshnessFile(stateDir)'),
+  src.indexOf('/**\n * 把 glob 模式转成锚定')
+)
+if (!guardSrc) throw new Error('护栏 B 的代码未找到（freshnessFile … freshnessVerdict）')
+const guardApi = new Function(
+  'join', 'readFileSync', 'writeFileSync', 'mkdirSync', 'shellQuotePath', 'syncErrText',
+  guardSrc + '\nreturn { freshnessGet, freshnessSet, freshnessForget, freshnessForgetProfile, remoteMtimeInfo, freshnessVerdict };'
+)(
+  (await import('node:path')).join,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  (s) => "'" + String(s) + "'",
+  (e) => String((e && e.message) || e)
+)
+
+console.log('E · 护栏 B 判据：三态（没变 / 被改过 / 读不到）')
+{
+  const same = guardApi.freshnessVerdict('100:200', { ok: true, exists: true, stamp: '100:200' })
+  check(same.changed === false && same.unknown === false, '记录一致 → 没被改过（照常推送）')
+  const diff = guardApi.freshnessVerdict('100:200', { ok: true, exists: true, stamp: '120:260' })
+  check(diff.changed === true && /已变/.test(diff.why), 'size:mtime 变了 → 判定"远端被改过"（不推送）')
+  const sizeOnly = guardApi.freshnessVerdict('100:200', { ok: true, exists: true, stamp: '101:200' })
+  check(sizeOnly.changed === true, '只有 size 变了也算（同秒内改动的兜底；举报人只提了 mtime，size 是白拿的）')
+  const gone = guardApi.freshnessVerdict('100:200', { ok: true, exists: false })
+  check(gone.changed === true && /不存在/.test(gone.why), '远端这份已消失 → 也算被改过（不静默重建）')
+  const unknown = guardApi.freshnessVerdict('100:200', { ok: false, exists: false, err: 'connection reset' })
+  check(unknown.changed === false && unknown.unknown === true,
+    '读失败 → 状态未知，**不能**当成被改过（把 flaky 连接变成"拦住写入"是错的）')
+  check(guardApi.freshnessVerdict('', null).changed === false, '没有记录 → 放行（首次推这个路径）')
+}
+
+console.log('E2 · 状态文件（~/.dsh/remote-ssh/writeback-mtimes.json）')
+{
+  const stateDir = mkdtempSync(join(tmpdir(), 'rssh-fresh-'))
+  try {
+    check(guardApi.freshnessGet(stateDir, 'p1', '/r/a.txt') === '', '没有记录时返回空串')
+    guardApi.freshnessSet(stateDir, 'p1', '/r/a.txt', '100:200')
+    check(guardApi.freshnessGet(stateDir, 'p1', '/r/a.txt') === '100:200', '写入后能读回')
+    check(existsSync(join(stateDir, 'writeback-mtimes.json')), '落在 writeback-mtimes.json（用户可人工检查/删除）')
+    guardApi.freshnessForget(stateDir, 'p1', '/r/a.txt')
+    check(guardApi.freshnessGet(stateDir, 'p1', '/r/a.txt') === '', 'forget 之后该路径没有记录')
+    guardApi.freshnessSet(stateDir, 'p1', '/r/a.txt', '1:2')
+    guardApi.freshnessSet(stateDir, 'p1', '/r/b.txt', '1:3')
+    guardApi.freshnessSet(stateDir, 'p2', '/r/c.txt', '1:4')
+    guardApi.freshnessForgetProfile(stateDir, 'p1')
+    check(guardApi.freshnessGet(stateDir, 'p1', '/r/a.txt') === '' && guardApi.freshnessGet(stateDir, 'p1', '/r/b.txt') === '',
+      'forgetProfile 清掉该连接的全部记录（push / sync 成功之后用）')
+    check(guardApi.freshnessGet(stateDir, 'p2', '/r/c.txt') === '1:4', '不碰别的连接的记录（负向控制）')
+    writeFileSync(join(stateDir, 'writeback-mtimes.json'), '{ not json', 'utf8')
+    check(guardApi.freshnessGet(stateDir, 'p1', '/r/a.txt') === '', '状态文件损坏 → 当作没有记录（不抛、不挡写入）')
+    check(guardApi.freshnessGet(join(stateDir, 'no-such-dir'), 'p9', '/r/x') === '', '状态目录不存在 → 空串（不抛）')
+  } finally {
+    rmSync(stateDir, { recursive: true, force: true })
+  }
+}
+
+console.log('E3 · remoteMtimeInfo：三态由真实 stat 输出决定')
+{
+  const runnerOf = (out) => async () => ({ ok: out.ok, exitCode: out.ok ? 0 : 1, stdout: out.stdout || '', stderr: out.stderr || '', error: out.error || '' })
+  const good = await guardApi.remoteMtimeInfo(runnerOf({ ok: true, stdout: '5242919 1760000000\n' }), {}, '/r/big.bin')
+  check(good.ok === true && good.exists === true && good.stamp === '5242919:1760000000', '正常输出 → size:mtime 解析正确')
+  const miss = await guardApi.remoteMtimeInfo(runnerOf({ ok: false, stderr: "stat: cannot statx '/r/gone': No such file or directory" }), {}, '/r/gone')
+  check(miss.ok === true && miss.exists === false, '远端没有这个文件 → exists:false（这才是"被改过"，不是"读不到"）')
+  const err = await guardApi.remoteMtimeInfo(runnerOf({ ok: false, stderr: 'ssh: connect to host x port 22: Connection refused' }), {}, '/r/a')
+  check(err.ok === false && err.exists === false, '连接失败 → ok:false（状态未知 → 调用方放行）')
+  const boom = await guardApi.remoteMtimeInfo(async () => { throw new Error('socket hang up') }, {}, '/r/a')
+  check(boom.ok === false && /socket hang up/.test(boom.err), 'runner 抛错 → 也归为"状态未知"，不崩')
+  let seen = ''
+  await guardApi.remoteMtimeInfo(async (p, cmd) => { seen = cmd; return { ok: true, stdout: '1 2' } }, {}, '/r/big.bin')
+  check(seen === "stat -c'%s %Y' '/r/big.bin'", '命令形状与本插件既有的 stat 一致：' + seen)
+}
+
+console.log('E4 · 接线：查→推→记，且 push/sync/显式写之后忘掉记录')
+{
+  const iCheck = src.indexOf('freshnessGet(wrapperDir, p.id, remoteFile)')
+  const iWrite = src.indexOf('remoteWriteFileChunked(runPooled, p, remoteFile, content)')
+  const iRecord = src.indexOf('freshnessSet(wrapperDir, p.id, remoteFile, after.stamp)')
+  check(iCheck > 0 && iCheck < iWrite, '推送**之前**先查（顺序：查 → 推）')
+  check(iRecord > iWrite, '推送**成功之后**才记录（顺序：推 → 记）')
+  check(/if \(verdict\.changed\)/.test(src), '被改过时走"不推送"分支')
+  check((src.match(/freshnessForgetProfile\(wrapperDir, p\.id\)/g) || []).length === 4,
+    'push/sync 成功后都清记录（工具 + API 两条路各两处 = 4）')
+  check(/freshnessForget\(wrapperDir, p\.id, args\.path\)/.test(src), 'API writeFile 成功 → 忘掉该路径的记录')
+  check(/freshnessForget\(wrapperDir, tc\.profile\.id, rp\)/.test(src), 'remote_ssh_write 成功 → 忘掉该路径的记录')
+  check(/freshnessForget\(wrapperDir, profile\.id, rp\)/.test(src), '文件面板保存成功 → 忘掉该路径的记录')
+  check(/else freshnessForget\(wrapperDir, p\.id, remoteFile\)/.test(src), '推送成功但读不到状态 → 不留陈旧记录')
+  check(/writeBackFreshness: z\.boolean\(\)\.default\(true\)/.test(src), '设置项 writeBackFreshness 默认**开**')
+  check(/DSH_REMOTE_SSH_WRITEBACK_FRESHNESS/.test(src), '环境变量可强制开关')
+  const body = grab('async function mirrorWriteToRemote')
+  check(/没有推送到远端/.test(body) && /remote_ssh_sync 把远端拉下来比对/.test(body),
+    '真实文案说明"没推送"，并给出 sync / push 两条出路')
+  check(/staleErr\.dshRemoteSshWriteBack = true/.test(body), '拦截用同一套标记错误（否则会被写入桥当普通错误吞掉）')
+}
+
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
 process.exit(fail ? 1 : 0)

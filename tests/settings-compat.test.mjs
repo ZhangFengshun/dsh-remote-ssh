@@ -62,9 +62,10 @@ const api = new Function(
   'parseYaml', 'join', 'readFile', 'z',
   grab('function ownEntryId') + '\n' + grab('function parseLegacyPrefsSection') + '\n' +
   grab('async function readLegacyPrefs') + '\n' + grab('function resolvePrefValue') + '\n' + grab('function prefsArray') + '\n' +
+  grab('function prefsScalar') + '\n' +
   grab('function describePrefsShape') + '\n' +
   grab('function createNewSettingsFace') + '\n' + grab('async function migrateLegacyPrefs') +
-  '\nreturn { ownEntryId, parseLegacyPrefsSection, readLegacyPrefs, resolvePrefValue, prefsArray, createNewSettingsFace, migrateLegacyPrefs };'
+  '\nreturn { ownEntryId, parseLegacyPrefsSection, readLegacyPrefs, resolvePrefValue, prefsArray, prefsScalar, createNewSettingsFace, migrateLegacyPrefs };'
 )(
   parseYaml,
   (await import('node:path')).join,
@@ -154,6 +155,17 @@ console.log('A4 · prefsArray / resolvePrefValue（volatile 字段是**引用对
   check(api.prefsArray(bad, [7])[0] === 7, '.get() 抛错 → 跳过该候选，退回下一个')
   check(api.prefsArray(undefined, null, 'x').length === 0, '都不是数组 → 空数组')
   check(api.resolvePrefValue('plain') === 'plain' && api.resolvePrefValue(null) === null, 'resolvePrefValue 对普通值原样返回')
+}
+
+console.log('A5 · prefsScalar（标量偏好：nodePath / writeBackFailure / writeBackFreshness）')
+{
+  check(api.prefsScalar('', 'x') === 'x', '取到第一个非空候选')
+  check(api.prefsScalar('err', undefined, null, '') === 'err', '全部为空 → 回退默认值（空串也算"没设"）')
+  // false 是合法取值，必须原样返回 —— 护栏 B 的开关就靠这一条
+  check(api.prefsScalar(true, false) === false, '**false 是合法值**，不能被当成"没设"而回退默认（护栏 B 开关）')
+  check(api.prefsScalar('error', { get: () => 'log', meta: { volatile: true } }) === 'log', 'volatile 引用对象 → 调 .get()（与数组同源问题）')
+  check(api.prefsScalar(true, { get: () => { throw new Error('gone') } }, false) === false, '.get() 抛错 → 跳过该候选，继续试下一个')
+  check(api.prefsScalar(0, 0) === 0, '0 也不算空（数值偏好可用）')
 }
 
 console.log('B1 · createNewSettingsFace（新版读写）')

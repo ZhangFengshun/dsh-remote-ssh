@@ -6,7 +6,7 @@
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
 const src = readFileSync(join(root, 'lib', 'index.js'), 'utf8')
@@ -244,13 +244,22 @@ console.log('场景 6d · 真实 ssh 的离线判据（ssh -G：解析命令行�
 {
   const { existsSync } = await import('node:fs')
   const { join: pjoin, dirname: pdirname } = await import('node:path')
-  const s23 = src.indexOf('function resolveWrapperNode(config) {')
+  const { readdirSync, mkdirSync } = await import('node:fs')
+  const s23 = src.indexOf('function probeRuntimeNode(baseDir, win) {')
   const e23 = src.indexOf('// apply', s23)
   if (s23 < 0 || e23 < 0) throw new Error('#23 的 wrapper node 解析代码未找到')
-  const grab23 = new Function(
-    'existsSync', 'join', 'dirname',
-    src.slice(s23, e23) + '\nreturn { resolveWrapperNode, wrapperShims, shSingleQuote };'
-  )(existsSync, pjoin, pdirname)
+  // process 也注入：场景 11 要伪造"打包版 Desktop"的进程画像（execPath 是 app 本体等）。
+  // 传入的 env 按引用共享，场景 7 改 process.env 仍然生效。
+  const grabWith = (proc) => new Function(
+    'existsSync', 'join', 'dirname', 'readdirSync', 'process',
+    src.slice(s23, e23) + '\nreturn { resolveWrapperNode, wrapperShims, shSingleQuote, probeRuntimeNode };'
+  )(existsSync, pjoin, pdirname, readdirSync, proc)
+  const grab23 = grabWith({
+    platform: process.platform,
+    env: process.env,
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
+  })
 
   console.log('场景 7 · node 解析优先级（issue #23）')
   const realNode = process.execPath
@@ -390,6 +399,66 @@ console.log('场景 6d · 真实 ssh 的离线判据（ssh -G：解析命令行�
       } finally {
         rmSync(dir, { recursive: true, force: true })
       }
+    }
+  }
+
+  console.log('场景 11 · 打包版 Desktop 的进程画像：前五条全落空后，⑥⑦ 必须接住（issue #23 第二轮验收）')
+  {
+    const root = mkdtempSync(join(tmpdir(), 'rssh-packaged-'))
+    try {
+      // ⑥ %DSH_HOME%\dsh-runtimes\<实例>\dependencies\node\bin\node.exe
+      const home = join(root, 'home')
+      const homeNode = join(home, 'dsh-runtimes', 'dsh-primary-runtime', 'dependencies', 'node', 'bin', 'node.exe')
+      mkdirSync(dirname(homeNode), { recursive: true })
+      writeFileSync(homeNode, 'x', 'utf8')
+      // ⑦ <应用安装目录>\resources\runtime\<实例>\dependencies\node\bin\node.exe
+      const appDir = join(root, 'Programs', 'DeepSeek Harness')
+      const appExe = join(appDir, 'DeepSeek Harness.exe')
+      mkdirSync(appDir, { recursive: true })
+      writeFileSync(appExe, 'x', 'utf8')
+      const appNode = join(appDir, 'resources', 'runtime', 'primary-runtime', 'dependencies', 'node', 'bin', 'node.exe')
+      mkdirSync(dirname(appNode), { recursive: true })
+      writeFileSync(appNode, 'x', 'utf8')
+
+      // 举报人在官方打包版上实测到的画像，逐条照搬：
+      //   execPath = app 本体（过不了 /node(\.exe)?$/ 门控）、没有 DSH_DESKTOP_NODE_EXECUTABLE、
+      //   没有 DSH_REMOTE_SSH_NODE、与 execPath 同目录没有 node.exe、没有 nodePath 设置
+      const packaged = (env) => ({ platform: 'win32', env: env, execPath: appExe, resourcesPath: undefined })
+      const r6 = grabWith(packaged({ DSH_HOME: home })).resolveWrapperNode({})
+      check(r6.bin === homeNode, '⑥ DSH_HOME 运行时目录接住（举报人提议的那条候选）')
+      check(/DSH_HOME/.test(r6.source), '⑥ 来源标明是 DSH_HOME（不是静默猜路径）')
+      const r7 = grabWith(packaged({})).resolveWrapperNode({})
+      check(r7.bin === appNode, '⑦ 没有 DSH_HOME 时，应用安装目录 resources\\runtime 接住')
+      check(/resources/.test(r7.source), '⑦ 来源标明是应用安装目录')
+      const explicit = join(root, 'explicit-node.exe')
+      writeFileSync(explicit, 'x', 'utf8')
+      check(grabWith(packaged({ DSH_HOME: home })).resolveWrapperNode({ nodePath: explicit }).bin === explicit,
+        '用户显式 nodePath 仍然最优先（⑥⑦ 只是兜底，不夺权）')
+      check(r6.bin !== '' && r7.bin !== '', '打包版画像下 baked 不再是空串（2.4.24 的缺口）')
+
+      // 探测的确定性与 primary 偏好
+      const multi = join(root, 'multi', 'dsh-runtimes')
+      for (const n of ['zzz-runtime', 'aaa-runtime', 'dsh-primary-runtime']) {
+        const p = join(multi, n, 'dependencies', 'node', 'bin', 'node.exe')
+        mkdirSync(dirname(p), { recursive: true })
+        writeFileSync(p, 'x', 'utf8')
+      }
+      check(grab23.probeRuntimeNode(multi, true) === join(multi, 'dsh-primary-runtime', 'dependencies', 'node', 'bin', 'node.exe'),
+        '多个运行时实例时优先含 primary 的那个（选择确定，与目录枚举顺序无关）')
+      check(grab23.probeRuntimeNode(join(root, 'nope'), true) === '', '目录不存在时返回空串而不是抛错')
+
+      // 负向控制：两条兜底都不可用 → 必须回到 2.4.24 的行为（空串 + PATH 回退 + 可操作错误）。
+      // 注意这里连 ⑦ 也要断掉：把 execPath 挪到一个没有 resources\runtime 的目录。
+      const rNone = grabWith({
+        platform: 'win32',
+        env: {},
+        execPath: join(root, 'nowhere', 'DeepSeek Harness.exe'),
+        resourcesPath: undefined,
+      }).resolveWrapperNode({})
+      check(rNone.bin === '', '负向控制：运行时目录都不存在时仍返回空串（退回 PATH，不比 2.4.24 差）')
+      check(rNone.tried.length >= 1, '并把尝试过的候选路径记下来（tried，用于日志/排障）')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   }
 }

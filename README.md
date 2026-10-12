@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.24
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.25
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -163,6 +163,11 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
   - **超过 4 MiB 的内容也照推**（分块 base64 追加 + 远端字节数校验）—— 旧版这里是确定性失败，"写日志、模型看不见"，于是模型以为远端已有该文件；
   - **推送失败会明确报错**，消息里写清"本地镜像已写入成功、只是没同步到远端"，并给出 `remote_ssh_push` 这条补救路径。想恢复"只写日志、不影响工具返回"的旧行为：设置 `writeBackFailure: "log"`（或环境变量 `DSH_REMOTE_SSH_WRITEBACK_FAILURE=log`）。
   - **不想让草稿跟着进远端**：工作区可设 `writeBack: false` 整体关闭，或用 `writeBackExclude` 排除路径（镜像相对路径，支持 `*` / `**` / `?`，结尾带 `/` 视为目录前缀），例如 `["_patch/**", "*.log"]`。
+  - **护栏 B（2.4.25 起，默认开）：推之前先看远端有没有被别人改过**。推送成功后插件记下远端的 `size:mtime`（`~/.dsh/remote-ssh/writeback-mtimes.json`），下次推同一路径前复查：**不一致或远端那份已消失 → 不推送**，并报错说明"本地镜像已写入成功、只是没推到远端"，给出 `remote_ssh_sync`（拉下来比对）/ `remote_ssh_push`（确认以本地为准）两条出路。共享集群上最常见的"另一个写入者"就是**你自己刚跑完的作业**，这条护栏挡的正是"作业改了远端、镜像还是旧版、agent 再写一次把改动覆盖掉"。
+    - 只在**远端自己的时间轴**上自比（不与本地 mtime 比：跨机时钟偏移、tar/base64 重写都会让两边不可比）；**读不到 ≠ 被改过** —— `stat` 失败、ssh 抖动都归为"状态未知"照常推送，只留一行日志。
+    - 显式写远端（`remote_ssh_write`、文件面板保存）或 `remote_ssh_push` / `remote_ssh_sync` 成功之后，相关记录会被清掉（那之后镜像与远端又是一致的）—— 这也是被拦下后的官方出路。
+    - **关掉它**：设置 `writeBackFreshness: false`，或环境变量 `DSH_REMOTE_SSH_WRITEBACK_FRESHNESS=off`（回到"每次都无条件覆盖"）。
+  - **这些开关都能在设置面板里改**（2.4.25 起）：设置 → 本插件 → 「写回与终端（进阶）」有 `nodePath` / `writeBackFailure` / `writeBackFreshness`；每个远程工作区下面多一组「启用写回 + 写回排除」。
 
 ## 模型工具
 
@@ -255,8 +260,9 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | **push 之后远端根多出 `.remote-ssh.json` / `README.md`，或者 `exclude` 好像没生效** | **2.4.20 的回归，2.4.22 已修复**：`sync` 方向的排除规则要带 shell 引号（拼进远端命令字符串），但同一条 helper 也被用在了 `push` 方向（字符串作为 **argv** 交给本地 tar，不经 shell）—— 引号于是成了模式的字面字符，所有 `--exclude` 静默失效，连代码写死的两条也没生效。升级到 **2.4.22** 并重启 DSH；**已经 push 过的话**请到远端根删掉多出来的 `.remote-ssh.json` 与 `README.md`（size 与本地镜像里那两个文件一致） |
 | **Windows 上拉取后，中文/日文等非 ASCII 文件名变成乱码（`报告_2026Q1.csv` → `鎶ュ憡_2026Q1.csv`），内容却完好** | **2.4.23 起已修复（issue #22）**。原因是一条三方各自的默认假设：远端 GNU tar 对较短的非 ASCII 名写的是**纯 ustar 头**（名字字段直接放裸 UTF-8 字节，无 PAX、无字符集声明），而 Windows 自带的 `tar.exe`（bsdtar 3.8.8）按**本地 ANSI 代码页**（中文机器 = CP936）解码它 —— **退出码 0、stderr 为空**，只有名字被改写；该构建又不支持 `--hdrcharset`。修法是让远端改用 `--format=pax`（`path=` 记录携带正确的 UTF-8 名），并用能力探针逐 profile 缓存结果，实测**体积零代价**。升级到 **2.4.23** 并重启 DSH 即可。**已经乱码的镜像**：不要直接 `force: true`（那会删掉你在这些副本上做过的修改）——首次整树同步会列出 `乱码名 → 正确名` 的对应关系，按提示要么带 `repairNames: true` 让插件清理（内容以远端为准），要么先在本地改回正确名再 `remote_ssh_push` |
 | **同步被提示「N 个疑似旧版本乱码文件名」** | 这不是"本地独有文件"，而是 ≤2.4.22 在 Windows 上拉取非 ASCII 名留下的改写副本（issue #22）。带 `repairNames: true` 重试即可清理（整树同步随原子替换移除；局部同步会删掉这些副本并顺手清空目录）。插件**只**删除已证明是某个远端正确名被 GBK 改写的那一份 —— 清单里混有真正的本地独有文件时依旧拒绝，绝不借"修复"之名删真文件 |
-| **DSH Desktop 上一打开「终端」页签就一闪而过（`'node' is not recognized…`）** | **2.4.24 起已修复（issue #23）**。生成出来的 wrapper 此前裸调 `node`，而桌面端**按设计**不把自带 node 放进子进程 PATH（`packageManager` 只覆盖包操作；内嵌 node 只以"被宿主用绝对路径调用"的形式存在），于是 PATH 上没有 node 的机器 100% 打不开终端 —— 与 SSH、密钥、跳板机全都无关。2.4.24 起：wrapper 里写死**绝对路径**的 node（优先取设置项 `nodePath` → 环境变量 `DSH_REMOTE_SSH_NODE` → **正在运行本插件的那个解释器** `process.execPath`），失败才回退 PATH，再失败就打一条可操作的错误（说明是本插件的终端、桌面端为何没有 node、怎么配）并以 127 退出。升级到 **2.4.24** 并重启 DSH 即可（wrapper 每次加载重写）。若仍失败，把 `nodePath` 设成 node 可执行文件的绝对路径 |
-| **`write` / `edit` 返回成功，远端却没有这个文件（例如内容超过 4 MiB）** | **2.4.24 起已修复（issue #24）**。写回桥此前在推送失败时只写一行宿主日志：① 超过 4 MiB 的内容被 `MAX_BYTES` 拦下（一个日志、CSV、notebook 就够），② 其余失败（ssh 断开、权限、配额）同样静默 —— 模型以为远端已有该文件。2.4.24 起：>4 MiB 改**分块上传**（并校验远端字节数），不再失败；仍失败时**明确报错**，消息写清"本地镜像已写入成功、只是没同步到远端"并给出 `remote_ssh_push` 补推路径。想恢复旧行为（只写日志）：设置 `writeBackFailure: "log"` |
+| **DSH Desktop 上一打开「终端」页签就一闪而过（`'node' is not recognized…`）** | **2.4.24 起已修复（issue #23）**。生成出来的 wrapper 此前裸调 `node`，而桌面端**按设计**不把自带 node 放进子进程 PATH（`packageManager` 只覆盖包操作；内嵌 node 只以"被宿主用绝对路径调用"的形式存在），于是 PATH 上没有 node 的机器 100% 打不开终端 —— 与 SSH、密钥、跳板机全都无关。2.4.24 起：wrapper 里写死**绝对路径**的 node（优先取设置项 `nodePath` → 环境变量 `DSH_REMOTE_SSH_NODE` → **正在运行本插件的那个解释器** `process.execPath`），失败才回退 PATH，再失败就打一条可操作的错误（说明是本插件的终端、桌面端为何没有 node、怎么配）并以 127 退出。**注意 2.4.24 的解析对官方发布形态是过强的**：打包版上 `execPath` 是 `DeepSeek Harness.exe`、`DSH_DESKTOP_NODE_EXECUTABLE` 不在子进程环境里、同目录也没有 node —— 五条候选**全部落空**（举报人对着打包产物逐条核对过，issue #23 第二轮验收）。**2.4.25 起**再补两条兜底：`%DSH_HOME%\dsh-runtimes\*\dependencies\node\bin\node.exe`（`DSH_HOME` 是宿主导出的通用根）与 `<应用安装目录>\resources\runtime\*\dependencies\node\bin\node.exe`（取自 `process.execPath`，另有 `process.resourcesPath` 那条）—— 实例名**不写死**（`primary` 优先、其余按名排序），逐个 `existsSync` 验证通过才用，用哪条都写进日志。升级到 **2.4.25** 并重启 DSH 即可（wrapper 每次加载重写）。若仍失败，最直接的办法是**在设置面板里把 `nodePath` 填成 node 可执行文件的绝对路径**（2.4.25 起该字段在「写回与终端（进阶）」区块里，不再只存在于配置文件中） |
+| **`write` / `edit` 返回成功，远端却没有这个文件（例如内容超过 4 MiB）** | **2.4.24 起已修复（issue #24）**。写回桥此前在推送失败时只写一行宿主日志：① 超过 4 MiB 的内容被 `MAX_BYTES` 拦下（一个日志、CSV、notebook 就够），② 其余失败（ssh 断开、权限、配额）同样静默 —— 模型以为远端已有该文件。2.4.24 起：>4 MiB 改**分块上传**（并校验远端字节数），不再失败；仍失败时**明确报错**，消息写清"本地镜像已写入成功、只是没同步到远端"并给出 `remote_ssh_push` 补推路径。想恢复旧行为（只写日志）：设置 `writeBackFailure: "log"`（2.4.25 起可直接在设置面板的下拉里选） |
+| **`write` / `edit` 报错说「本地镜像已写入成功，但**没有推送到远端**」** | 这是 **2.4.25 起的护栏 B**（issue #24 第二轮，默认开）：推之前插件发现远端这一份**自上次推送后已被改动**（共享集群上最常见的就是你自己刚跑完的作业写了它），于是选择**只报告、不覆盖** —— 直接推上去会把那些改动静默抹掉。处理：先 `remote_ssh_sync`（或 `remote_ssh_cat`）把远端拉下来比对；确认要以本地为准，用 `remote_ssh_push` 覆盖（push/sync 成功后该记录会被清掉，不会一直拦着）。想彻底关掉：设置里的 `writeBackFreshness`，或环境变量 `DSH_REMOTE_SSH_WRITEBACK_FRESHNESS=off`。若日志里写的是"无法确认远端状态"，那是连接问题 —— 这种情况插件**照常推送**，只留一行日志（读不到 ≠ 被改过） |
 | **在会话目录里写的草稿/临时文件被无声推到远端（共享集群的项目目录）** | 写回桥对 agent 的 `write`/`edit` 是"落镜像 + 推远端"（issue #24 的护栏建议）。工作区可设 `writeBack: false` 整体关掉写回，或用 `writeBackExclude` 排除路径：镜像相对路径、支持 `*` / `**` / `?`，结尾带 `/` 视为目录前缀，例如 `["_patch/**", "*.log", "scratch/"]`。两者都**只影响写回**，`remote_ssh_push` 仍可手工把需要的东西推上去 |
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |
