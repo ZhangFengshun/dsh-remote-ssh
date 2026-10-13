@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.26
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.27
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -263,6 +263,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | **DSH Desktop 上一打开「终端」页签就一闪而过（`'node' is not recognized…`）** | **2.4.24 起已修复（issue #23）**。生成出来的 wrapper 此前裸调 `node`，而桌面端**按设计**不把自带 node 放进子进程 PATH（`packageManager` 只覆盖包操作；内嵌 node 只以"被宿主用绝对路径调用"的形式存在），于是 PATH 上没有 node 的机器 100% 打不开终端 —— 与 SSH、密钥、跳板机全都无关。2.4.24 起：wrapper 里写死**绝对路径**的 node（优先取设置项 `nodePath` → 环境变量 `DSH_REMOTE_SSH_NODE` → **正在运行本插件的那个解释器** `process.execPath`），失败才回退 PATH，再失败就打一条可操作的错误（说明是本插件的终端、桌面端为何没有 node、怎么配）并以 127 退出。**注意 2.4.24 的解析对官方发布形态是过强的**：打包版上 `execPath` 是 `DeepSeek Harness.exe`、`DSH_DESKTOP_NODE_EXECUTABLE` 不在子进程环境里、同目录也没有 node —— 五条候选**全部落空**（举报人对着打包产物逐条核对过，issue #23 第二轮验收）。**2.4.25 起**再补两条兜底：`%DSH_HOME%\dsh-runtimes\*\dependencies\node\bin\node.exe`（`DSH_HOME` 是宿主导出的通用根）与 `<应用安装目录>\resources\runtime\*\dependencies\node\bin\node.exe`（取自 `process.execPath`，另有 `process.resourcesPath` 那条）—— 实例名**不写死**（`primary` 优先、其余按名排序），逐个 `existsSync` 验证通过才用，用哪条都写进日志。升级到 **2.4.25** 并重启 DSH 即可（wrapper 每次加载重写）。若仍失败，最直接的办法是**在设置面板里把 `nodePath` 填成 node 可执行文件的绝对路径**（2.4.25 起该字段在「写回与终端（进阶）」区块里，不再只存在于配置文件中） |
 | **`write` / `edit` 返回成功，远端却没有这个文件（例如内容超过 4 MiB）** | **2.4.24 起已修复（issue #24）**。写回桥此前在推送失败时只写一行宿主日志：① 超过 4 MiB 的内容被 `MAX_BYTES` 拦下（一个日志、CSV、notebook 就够），② 其余失败（ssh 断开、权限、配额）同样静默 —— 模型以为远端已有该文件。2.4.24 起：>4 MiB 改**分块上传**（并校验远端字节数），不再失败；仍失败时**明确报错**，消息写清"本地镜像已写入成功、只是没同步到远端"并给出 `remote_ssh_push` 补推路径。想恢复旧行为（只写日志）：设置 `writeBackFailure: "log"`（2.4.25 起可直接在设置面板的下拉里选） |
 | **`write` / `edit` 报错说「本地镜像已写入成功，但**没有推送到远端**」** | 这是 **2.4.25 起的护栏 B**（issue #24 第二轮，默认开）：推之前插件发现远端这一份**自上次推送后已被改动**（共享集群上最常见的就是你自己刚跑完的作业写了它），于是选择**只报告、不覆盖** —— 直接推上去会把那些改动静默抹掉。处理：先 `remote_ssh_sync`（或 `remote_ssh_cat`）把远端拉下来比对；确认要以本地为准，用 `remote_ssh_push` 覆盖（push/sync 成功后该记录会被清掉，不会一直拦着）。想彻底关掉：设置里的 `writeBackFreshness`，或环境变量 `DSH_REMOTE_SSH_WRITEBACK_FRESHNESS=off`。若日志里写的是"无法确认远端状态"，那是连接问题 —— 这种情况插件**照常推送**，只留一行日志（读不到 ≠ 被改过）。设了 `writeBackFailure: "log"` 时工具不会报错，但**同一份完整报告会写进日志**（2.4.26 起），别只看工具返回值 |
+| **本地会话里"部分文件打不开"：`cannot read: ENOENT …<profile>\tools\x.py`** | **2.4.27 起已修复（issue #25）**。为了远程工作区，本插件以 `exact` 路由接管了 better-sidebar 的 `/sidebar/file` 与 `/sidebar/api/fs.*` —— 而 **exact 连本地会话一起抢**：本地分支此前把相对路径原样交给 `fs`，Node 按**插件宿主进程的 `process.cwd()`**（pnpm profile 目录）解析，于是相对路径报 ENOENT、绝对路径正常，用户看到的就是"部分文件打不开"。写操作更危险：`fs.write` / `fs.remove` 拿到相对路径会打到**插件宿主目录**里。2.4.27 起所有落点（`/sidebar/file`、`fs.read/tree/trees/write/rename/remove/mkdir/search` 的本地与远程分支、`git.*`、`open.external`）都先按**会话 cwd** 归一（与上游 `ensureWorkspacePath` 同语义）；取不到会话 cwd 时**明确报错**，不再猜 `process.cwd()` |
 | **在会话目录里写的草稿/临时文件被无声推到远端（共享集群的项目目录）** | 写回桥对 agent 的 `write`/`edit` 是"落镜像 + 推远端"（issue #24 的护栏建议）。工作区可设 `writeBack: false` 整体关掉写回，或用 `writeBackExclude` 排除路径：镜像相对路径、支持 `*` / `**` / `?`，结尾带 `/` 视为目录前缀，例如 `["_patch/**", "*.log", "scratch/"]`。两者都**只影响写回**，`remote_ssh_push` 仍可手工把需要的东西推上去 |
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |

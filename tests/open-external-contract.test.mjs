@@ -167,8 +167,10 @@ console.log('B2 · 两条分支：远程翻译成远端路径，本地保持上�
   const handler = src.slice(src.indexOf('async function interceptOpenExternalHandler'))
   check(handler.includes('requestTrust(req, false)') && handler.includes('denyRequest'), '信任校验（与 fs.* 同规则）')
   check(handler.includes('req.method !== "POST"') && handler.includes('405'), '非 POST → 405')
-  check(handler.includes('isAbsoluteLocalPath(localPath)'), 'reveal 必须是绝对路径')
-  check(handler.includes('path must be an absolute path'), 'reveal 非法路径 → bad-request')
+  // 2.4.27（issue #25）起：reveal 的相对路径先按会话 cwd 归一（与上游 ensureWorkspacePath 同语义），
+  // 解析不了才 bad-request —— 行为断言在 tests/session-path.test.mjs 的 B37–B39。
+  check(handler.includes('resolveSessionPath(rawRevealPath, revealBase)'), 'reveal 先按会话 cwd 归一')
+  check(handler.includes('badRequest(unresolvedPathMessage(rawRevealPath, revealBase, revealResolved.reason))'), 'reveal 解析不了 → bad-request')
   check(handler.includes('url must be a custom-scheme URL'), 'url 非法协议 → bad-request')
   check(handler.includes("action must be \"reveal\" or \"url\""), '未知 action → bad-request（对齐上游文案）')
 

@@ -216,15 +216,16 @@ console.log('C2 · 两条分支都必须实现 fs.trees / fs.mkdir')
   check(remoteTrees.includes('readPathsField(payload)') && remoteTrees.includes('400'), '远程 fs.trees：字段校验 + bad-request')
   check(remoteTrees.includes('remoteListDirsBatch(runPooled, profile'), '远程 fs.trees：批量远端列举')
   check(remoteTrees.includes('localToRemote(lp, remoteBase, remoteInfo.remotePath)'), '远程 fs.trees：镜像路径 → 远端路径')
-  check(remoteTrees.includes('sidebarEntriesFrom(lvl.entries, locals[i])') && remoteTrees.includes('path: locals[i]'), '远程 fs.trees：levels 形状与上游一致')
-  check(localTrees.includes('localListDir(lp, LIST_LIMIT)') && localTrees.includes('levels: levels'), '本地 fs.trees：本地工作区不能 404（否则本地会话反而被弄坏）')
+  check(remoteTrees.includes('sidebarEntriesFrom(lvl.entries, r.path)') && remoteTrees.includes('path: r.path'), '远程 fs.trees：levels 形状与上游一致')
+  check(localTrees.includes('localListDir(r.path, LIST_LIMIT)') && localTrees.includes('levels: levels'), '本地 fs.trees：本地工作区不能 404（否则本地会话反而被弄坏）')
 
   const remoteMkdir = src.slice(src.indexOf('} else if (method === "fs.mkdir") {'), src.indexOf('} else {', src.indexOf('} else if (method === "fs.mkdir") {')))
   check(remoteMkdir.includes('mkdir -- ') && remoteMkdir.includes('shellQuotePath(destRemote)'), '远程 fs.mkdir：在远端 mkdir（路径单引号引用）')
   check(remoteMkdir.includes('already exists') && remoteMkdir.includes('409'), '远程 fs.mkdir：同名 → 409（对齐上游）')
   check(remoteMkdir.includes('invalidateRemoteCaches(profile, parentRemote'), '远程 fs.mkdir：父目录缓存失效（刷新能看到新目录）')
   check(!remoteMkdir.includes('mkdir(join(parentLocal'), '远程 fs.mkdir：不在本地镜像里建目录')
-  check(src.includes('localMakeDir(payload.path || sessionCwd'), '本地 fs.mkdir：走 localMakeDir')
+  // 2.4.27（issue #25）起本地 mkdir 也先归一：路径经 localPathOf 解析后再交给 localMakeDir。
+  check(src.includes('localMakeDir(p, String(payload.name || ""))') && src.includes('localPathOf(payload.path || sessionCwd, pathBase)'), '本地 fs.mkdir：走 localMakeDir（路径先按会话 cwd 归一）')
 }
 
 console.log('C3 · 远程工作区探测：fs.trees 没有 path 字段，用 paths[0] 兜底')

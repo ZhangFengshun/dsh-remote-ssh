@@ -282,6 +282,35 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
   `node -e "const s=require('fs').readFileSync(process.argv[1],'utf8');console.log([...new Set([...s.matchAll(/\"(fs\.[a-zA-Z]+)\"/g)].map(m=>m[1]))].join(' '))" "<profile>\node_modules\dsh-better-sidebar\lib\index.js"`
   （客户端真实调用侧看同一包的 `lib/client.js` 里的 `call(\"fs.*\")`；`fs.tree` 仍要保留 —— 旧版客户端与编辑器侧栏都在用）。
   两条分支**都必须实现**：exact 路由会连本地会话一起抢占，只在远程分支处理会让本地工作区的该端点 404、反而弄坏原本正常的功能。
+  **接管的不只是端点，还有路径语义**（2026-10-13 issue #25，实测复现）—— 被接管的原实现按**会话 cwd / worktree 根**
+  解析相对路径（`ensureWorkspacePath(activeWorktreeRootOf(ctx, sessionId, sessionCwd), raw)`），本插件早期版本把
+  `payload.path` 原样交给 `fs`，Node 于是按**插件宿主进程的 `process.cwd()`**（pnpm profile 目录）解析。在运行中的
+  宿主上实测（2.4.26，只发只读请求）：
+  ① `GET /sidebar/file?sessionId=<假>&path=tools/check_file_size.py` → `400 cannot read: ENOENT … stat '<profile>\tools\check_file_size.py'`（与举报人给的一字不差）；
+  ② `POST /sidebar/api/fs.read {path:"package.json"}` → **200，返回的是 profile 自己的 `package.json`**（比 ENOENT 更坏：静默读到错文件，用户毫无察觉）；
+  ③ `fs.tree {path:"."}` → 列出 profile 目录（`.plugin-manager`、`node_modules`…）；④ 同一文件换**绝对路径** → 200（所以"只有相对路径坏"，极难自查）。
+  写操作同理：`fs.write` / `fs.remove` 拿到相对路径会在**插件宿主目录**里写/删（能覆盖 profile 里的同名文件）。
+  **修法（2.4.27）**：模块级纯函数 `resolveSessionPath(raw, base)` + `unresolvedPathMessage()`，**每一处落点都过它**
+  （`/sidebar/file`、`fs.read/tree/trees/write/rename/remove/mkdir/search` 的本地与远程分支、`git.*` 本地分支、`open.external`）；
+  取不到会话 cwd 时**一律报错，绝不回退 `process.cwd()`** —— 那个兜底正是 bug 本身。`fs.trees` 逐条报错（一条坏路径不拖垮整棵树）。
+  **测法（可直接复用）**：切片真实 handler + 假 `ctx/req/res`，把 `process.chdir()` 到一个"插件宿主目录"并放 **canary 文件**，
+  断言相对路径落在会话 cwd 下、canary **既读不到也删不掉**、拿不到会话 cwd 时必须报错。
+  并做**变异负向控制**（把修复点改回旧行为，确认测试真的会红）：本处两处变异分别让 12 条 / 2 条断言变红 ✓。
+  **重构会让老的形状断言失效**：`fs-trees-contract` / `open-external-contract` 里 5 条断言指向被改掉的代码文本 ——
+  这时要先判断"它保护的**契约**变了没有"（本次都没变，只是变量名/新增了归一这一步），再改断言指向新代码，
+  **不要直接删**，也不要为了让测试变绿而放宽契约。
+  **上游的路径阶梯要照抄语义**（2026-10-13 从装好的 `dsh-better-sidebar/lib/index.js` 里读出来的事实，
+  举报人在 #25 的评论里也提供了同一事实）：
+  `buildApi` 的 `cwdOf(payload)` 用 `requireString(payload, "sessionId")` —— **sessionId 是必填**，且把 `payload.cwd`
+  当 `clientCwd` 传给 `sessionCwdOf(ctx, sessionId, clientCwd)`；阶梯是
+  **会话注册表 `ctx.sessions.get(sessionId)?.header.cwd` → 客户端 cwd（`requireAbsolute()`，非绝对即 400）→
+  `sessionPersistence` 持久化元数据 → `process.cwd()`**。`gitCwdOf = cwdOf + resolveWorktree(worktree)`（`worktree` 同样"从不直接采信"）；
+  `ensureWorkspacePath(cwd, target)` 就是 `resolveTarget(cwd, target)`；**git 的 pathspec（`add/reset/checkout -- <path>`、
+  `show <rev>:<path>`）是仓库相对路径，不按会话 cwd 归一**，别顺手"修"它们。
+  两条可操作的结论：① 真实面板流量**一定带 sessionId**，所以"取不到会话 cwd 就报错"这条兜底不会影响正常客户端
+  （它替换掉的 `process.cwd()` 尾级实际是死代码）；② **客户端给的 cwd / worktree 必须自己校验绝对性** ——
+  `join(相对 base, 相对 path)` 拼出来仍是相对路径，fs 又会按 `process.cwd()` 解析，等于把 #25 放回来。
+  本插件没有引入 `sessionPersistence` 那一级（需要上游内部 API），如实记为已知差异。
   `fs.trees` 的响应形状必须对齐上游：`{ levels: [{ path(回显客户端传入的路径，客户端拿它当缓存键), entries, truncated, error? }] }`，
   单层失败**不**让整批失败；远端批量列举用 `remoteListDirsBatch()`（`__DSH_LVL__` 标记分段，**一次 SSH 往返**列举 N 个目录，
   别退化成 N 次 SSH），命中 `treeCache` 的层 0 RTT。

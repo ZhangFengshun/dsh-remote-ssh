@@ -2,6 +2,35 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.27] — 本地会话的相对路径被解析到**插件宿主目录**（fs.* / /sidebar/file / git / open.external）
+### 修复
+- **接管 `/sidebar/file` 与 `/sidebar/api/fs.*` 之后，本地会话的相对路径丢了"按会话 cwd 解析"的语义（issue [#25](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/25)，2026-10-13 guolei1993 报）**。为了让远程工作区可用，本插件以 `kind: "exact"` 接管了 better-sidebar 的这些路由 —— **exact 路由连本地会话一起抢**，而本地分支把路径原样交给 `fs`，Node 于是按**插件宿主进程的 `process.cwd()`**（pnpm profile 目录）解析：
+  `cannot read: ENOENT: no such file or directory, stat '<profile>/tools/check_file_size.py'`。
+  被接管的原实现是 `ensureWorkspacePath(activeWorktreeRootOf(ctx, sessionId, sessionCwd), raw)`，即**相对路径按会话 cwd 解析**。绝对路径不受影响，所以用户侧只表现为"部分文件打不开"，几乎无法自查。报告人逐行给出了 5 处落点（含 `handleSidebarFile` 里 cwd 算完却未被使用）。
+  - **修法**：新增模块级纯函数 `resolveSessionPath(raw, base)`（绝对路径原样返回；相对路径按会话 cwd 拼接；`~` 原样返回不擅自展开）+ `unresolvedPathMessage()`（统一的可读报错）。**每一处落点都过它**：`/sidebar/file`、`fs.read / tree / trees / write / rename / remove / mkdir / search`（本地与远程两条分支）、`git.*` 的本地分支、`open.external` 的 `reveal`。
+  - **取不到会话 cwd 时一律报错，绝不回退 `process.cwd()`**：那是这个 bug 的成因，留着当兜底等于把 bug 留一半。报错文案会带上用户给的相对路径并提示补 `cwd` / `sessionId`。
+  - **写操作尤其危险**：`fs.write` / `fs.remove` 拿到相对路径会在**插件宿主目录**里写/删（例如覆盖 profile 里的同名文件、删掉 profile 下的目录）。测试用一个 canary 目录把这一点钉死。
+  - `fs.trees` 采用**逐条报错**：一条路径解析不了只让那一条带 `error`（客户端按 level 渲染），同一批里能解析的照常返回 —— 不让一条坏路径把整棵树拖成 400。
+  - 顺带收敛两处重复：`isAbsoluteLocalPath` 由 `apply()` 闭包里的一份改为模块级唯一实现（并补上 UNC）；会话 cwd 的取法统一成 `sessionCwdFrom(payload, explicit)`（`payload.cwd` 优先 → `sessionId` 查注册表），`gitContextOf` 等处不再各写一遍。
+  - **一处有意的行为变化**：`git.*` 在既没有 `cwd` 也取不到会话工作目录时，此前会静默按 `process.cwd()`（插件宿主目录）跑 —— 也就是**显示一个错的仓库**；现在改为明确报错。
+  - **客户端传来的 `cwd` 只在绝对路径时采信**（对齐上游 `sessionCwdOf` → `requireAbsolute()`：连 `C:foo` 这种盘符相对形式都拒）。相对 cwd 拼出来的仍是相对路径，fs 又会按 `process.cwd()` 解析 —— 等于把 bug 放回来。基准确认为相对时同样按"解析不了"报错。
+  - 远程分支同样归一：相对路径此前会被 `localToRemote` 当作"镜像外路径"追加到远端根，落在**错误的位置**（工作区子目录下会缺一段）。
+- **与上游/举报人实现的一处差异（知情选择）**：上游 `sessionCwdOf()` 的阶梯是 会话注册表 → 客户端 cwd（必须绝对）→ `sessionPersistence` 里的持久化元数据 → **`process.cwd()`**；[#25](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/25) 的举报人也保留了这个最后的 `process.cwd()` 兜底（"仅兜底并记一行日志"）。本插件改为**明确报错**：`process.cwd()` 是插件宿主进程的目录（pnpm profile，或 DSH 恰好从别的仓库启动时的那个仓库），拿它当兜底等于在不确定的目录里跑 `git status`（读）甚至 `git discard` / `git revert`（写）。上游的阶梯只有在注册表**与**持久化元数据都取不到时才走到那一步；上游 `cwdOf()` 本身又**强制要求 `payload.sessionId`**，所以正常面板流量永远拿得到会话 cwd，这条兜底实际上是死代码 —— 换成一条看得懂的报错不会影响任何真实客户端。本插件也没有引入 `sessionPersistence` 那一级（那要用上游的内部 API），已知差异如实记在这里。
+- **致谢**：[#25](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/25) 的举报人独立做出了同一修复（纯函数 + 16 处接线）并给出了可重放的锚点脚本与残留检查，还提供了上游 `ensureWorkspacePath` / 路径阶梯的关键事实；2.4.27 的落点与其一致，另补了 `fs.search` 的本地分支。
+- **边界如实说清**：会话 cwd 与 git worktree 根不同的场景（会话在仓库子目录里启动）下，本插件按**会话 cwd** 解析，而上游 `activeWorktreeRootOf` 会先上溯到 worktree 根。插件侧没有 worktree 概念，暂不引入；等真遇到再补。
+
+### 测试
+- `tests/session-path.test.mjs`（新增）**80 条断言**，三层：
+  - **纯函数真值表**：绝对（POSIX / 盘符 / 正斜杠盘符 / UNC）、相对拼接、`./` 与 `..` 归一、无基准不解析、空值、`~` 不展开，以及每类失败的可读文案；
+  - **真实处理器的行为**（源码切片 + 假 `ctx`/`req`/`res`，并把 `process.chdir()` 到一个"插件宿主目录"，里面放 canary 文件）：`fs.read`/`tree`/`trees`/`write`/`rename`/`remove`/`mkdir`/`search`、`/sidebar/file`、`git.diff`、`open.external reveal` —— 相对路径必须落在**会话 cwd** 下；canary 文件**既读不到也删不掉**；解析不了时必须报错（旧的"落到宿主目录"行为会让这些断言直接红）；
+  - **接线与文档**：每处落点都归一、本地分支不再把 `payload.path` 直传 fs 函数、这些处理器（剥掉注释后）**不再出现 `process.cwd()`**、绝对路径判断与会话 cwd 取法各只有一份实现、版本/CHANGELOG/README。
+
+### 升级
+```bash
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.27
+```
+升级后**重启 DSH**（这些是宿主侧路由逻辑，重启才会重新加载）。本地会话里用相对路径打开文件/文件树/git 面板都受此影响，建议升级。
+
 ## [2.4.26] — 护栏 B 的「只记日志」变成可验证的行为（判定与处置抽成纯函数）
 ### 修复 / 变更
 - **护栏 B 的判定、文案与处置从 `apply()` 的闭包里抽成三个可注入的纯函数**（issue [#24](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/24) 结案时举报人点出的"未覆盖"项）：
