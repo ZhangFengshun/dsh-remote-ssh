@@ -7,7 +7,7 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本地版本 / npm latest / GitHub main | **2.4.28**（2026-10-14 发布）：npm `dist-tags.latest`、tag `v2.4.28`、GitHub Release 三者一致，commit `d0ce933`；已装进桌面 profile（`lib/index.js` 328,826 字节 / SHA256 `62B7288892347A10270AE5926765237E692ADFFF5FE2FA1A13C119036787A32C`，与 npm 产物同哈希）。**需重启 DSH 才生效** |
+| 本地版本 / npm latest / GitHub main | **2.4.29**（2026-10-14 发布）：npm `dist-tags.latest`、tag `v2.4.29`、GitHub Release 三者一致，commit `5bd5e1c`（npm tarball shasum `0f4c81783394ec999b1a6f22c197794e277f391a`）；已装进桌面 profile（`lib/index.js` 333,543 字节 / SHA256 `6E9098829F1F797A0E6D78B3A31ECBC9BC4ADEE35DAC35399DBB0BCF88E03E1E`，与 npm 产物同哈希）。**需重启 DSH 才生效** |
 | 仓库 | https://github.com/ZhangFengshun/dsh-remote-ssh（HTTPS，分支 main） |
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
