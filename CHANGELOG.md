@@ -2,6 +2,34 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.28] — 接管 better-sidebar 0.25.0 新增的 6 个端点（fs.createFile / git.blame / diff-head / worktrees / pull / push）
+### 修复
+- **本机 profile 里的 `dsh-better-sidebar` 从 0.24.1 升到 0.25.0，新增 9 个端点，其中 6 个与仓库/路径相关 —— 本插件此前没有注册它们**（不是用户报的 issue，是维护笔记里"升级 better-sidebar 后必做对拍"这条硬规则查出来的）。本插件用 `kind: "exact"` 接管 `/sidebar/api/fs.*` 与 `git.*`，**没注册的端点会回落到上游实现**，而远程工作区里上游拿到的 cwd 是**本地镜像目录**：
+  - `fs.createFile`（0.25.0 新增）→ 空文件只建在**本地镜像**里，远端永远没有这个文件（与 2.4.18 那次 `fs.trees` 绕过拦截同一类，用户侧看到的是"建好了但远端没有"）；
+  - `git.blame` / `git.diff-head`（0.25.0 新增）→ 按镜像的 git 状态计算（镜像里通常没有 `.git`，于是空结果或报错）；
+  - `git.worktrees`（0.24.1 就有，此前也漏了，本次一并补上）→ 同上；
+  - `git.pull` / `git.push`（0.25.0 新增）→ 在**镜像**上跑 `git pull --ff-only` / `git push`，动的是一个与远端无关的仓库。
+  - **修法**：`fs.createFile` 加进 fs 的 exact 路由数组并实现本地/远程两条分支；`GIT_METHODS` 补上 5 个方法及其与上游一致的实参（`blame --porcelain -L <s>,<e> -- <path>`、`diff --no-ext-diff --no-color -U3 HEAD -- <path>`（无 HEAD 时回退 `--cached`）、`worktree list --porcelain`、`pull --ff-only`、`push`）。
+- **新增纯函数**（规则逐条对齐上游，便于单测）：`creatableFileNameProblem`（单段名 + 非法字符 `<>:"|?*` 与控制字符 + Windows 保留设备名；按码点迭代，合法 emoji 名不会被拆成两个非法半字符）、`isoWithOffset`、`parseBlamePorcelain`（同一 commit 只在**首块**取 author/date/summary，后续行复用）、`parseWorktreeList`（换行 / NUL 两种分隔都能吃）、`countStatusEntries`（改名在 `-z` 输出里占两条 NUL 记录，只算一条 —— 口径同上游 `entries.length`）、`posixPathIdentity` / `localPathIdentity`。
+- **`git.worktrees` 有意少一次往返**：上游对每个 worktree 调用完整的 `status()`（4 次 git 调用），远程工作区下每个 worktree 就是 4 次 SSH 往返；这里每个 worktree 只跑一条 `status --porcelain=v1 -z --untracked-files=all`，计数口径相同。其余字段（`path` / `branch` / `current` / 排序）与上游一致。
+- **`git.pull` 成功后清两处缓存**：整棵远端列举缓存失效（工作树可能变了），并清掉写回桥的**远端指纹**记录 —— 那些记录描述的是 pull 之前的远端内容，留着只会让下一次写回被误判成"远端已改动"而拒绝写入。`git.push` 不动工作树，因此不做失效（避免无谓刷新）。
+- **状态码对齐上游**：`fs.mkdir` / `fs.createFile` 的"已存在"统一 **409**（本地分支此前误给 400，与自己的远程分支都不一致）；形状/参数错误统一 400 + wire code **`bad-request`**（本地分支此前一律 `fs-error`），这样客户端才能显示"哪条规则不对"。
+- **远端建空文件用 `set -C`（noclobber）重定向**：即使"探测是否已存在"与"创建"之间有人抢先建了同名文件，这里也只会失败，不会把别人的文件清空。
+- **不接管 3 个纯模型端点**（`git.models` / `git.suggest-message` / `git.commit-model`）：它们不碰仓库路径（`models` 走 `ctx.get("llm")` 列 provider），交给上游才对。已知小瑕疵：`suggest-message` 取的是镜像里的 `git status`，远程工作区下可能滞后一次同步。
+- **已知边界（既有的，不是本次引入）**：`payload.repoRoot`（多仓库选择器）本插件的 git 端点一概不处理；镜像里通常没有 `.git`（同步排除 `.git`），所以未接管的仓库类端点只会报 `not a git repository`，不会给出错的仓库结果。
+
+### 测试
+- `tests/sidebar-0250-endpoints.test.mjs`（新增）**105 条断言**，三层：
+  - **纯函数真值表**：文件名校验（单段 / 非法字符 / 控制字符 / 22 个保留名 / 不误伤 `nulx` 与 emoji 名）、`isoWithOffset`（带偏移 / 无偏移 / 非法时区）、blame porcelain（首块复用语义）、worktree 列表（换行 / NUL / locked / prunable / 末尾无空行）、status 计数（改名只算一条）；
+  - **真实处理器的行为**（源码切片 + 假 `ctx`/`req`/`res` + 假远端）：本地 `fs.createFile` 真落盘（含"宿主目录里不能多出文件"的 canary 断言）与 409；远程分支断言**SSH 命令形状**（远端绝对路径、创建前探测、noclobber、父目录列举失效）；5 个 git 端点的实参与返回形状；`worktrees` 必须用**每个 worktree 自己的目录**跑 status（不是会话 cwd）；pull 的失效与指纹清理；
+  - **接线 + 上游对拍（自动化）**：注册数组必须含这 6 个端点、模型类端点必须**不**在里面；若本机装了 `dsh-better-sidebar`，① 读它的 `lib/index.js` 把宿主 handler 键集合与注册集合逐项比对，② 把它的**真实纯函数**抽出来与本次实现做**语义差分对拍**（文件名校验的接受/拒绝与拒绝文案、`isoWithOffset`、blame porcelain、worktree 列表，同一批输入逐条比较）—— 没装则 SKIP、不算失败。两段合起来把 MAINTENANCE 里"升级后必做"的人工步骤变成会红的断言。
+
+### 升级
+```bash
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.28
+```
+升级后**重启 DSH**（宿主侧路由逻辑）。若你在远程工作区里用过文件树的"新建文件"，或 git 面板的 blame / 工作树 / 拉取 / 推送，建议升级。
+
 ## [2.4.27] — 本地会话的相对路径被解析到**插件宿主目录**（fs.* / /sidebar/file / git / open.external）
 ### 修复
 - **接管 `/sidebar/file` 与 `/sidebar/api/fs.*` 之后，本地会话的相对路径丢了"按会话 cwd 解析"的语义（issue [#25](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/25)，2026-10-13 guolei1993 报）**。为了让远程工作区可用，本插件以 `kind: "exact"` 接管了 better-sidebar 的这些路由 —— **exact 路由连本地会话一起抢**，而本地分支把路径原样交给 `fs`，Node 于是按**插件宿主进程的 `process.cwd()`**（pnpm profile 目录）解析：

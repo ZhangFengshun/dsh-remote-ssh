@@ -7,7 +7,7 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本地版本 / npm latest / GitHub main | 2.3.9，三者一致 |
+| 本地版本 / npm latest / GitHub main | 2.4.27（已发布并推送、已装进桌面 profile；**需重启 DSH 才生效**）；工作树正在做 2.4.28（better-sidebar 0.25.0 新增 6 个端点接管，未发布） |
 | 仓库 | https://github.com/ZhangFengshun/dsh-remote-ssh（HTTPS，分支 main） |
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
@@ -296,6 +296,30 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
   **测法（可直接复用）**：切片真实 handler + 假 `ctx/req/res`，把 `process.chdir()` 到一个"插件宿主目录"并放 **canary 文件**，
   断言相对路径落在会话 cwd 下、canary **既读不到也删不掉**、拿不到会话 cwd 时必须报错。
   并做**变异负向控制**（把修复点改回旧行为，确认测试真的会红）：本处两处变异分别让 12 条 / 2 条断言变红 ✓。
+  **2026-10-14 实例：0.25.0 升级后对拍查出 6 个端点未接管（不是用户报的 issue）** —— 桌面 profile 被应用升到
+  `dsh-better-sidebar@0.25.0`（0.24.1 → 0.25.0），照上面的规则比对「宿主 handler 键集合 vs 本插件注册集合」：
+  fs 由 8 变 9（新增 `fs.createFile`），git 由 14 变 21（新增 `git.blame` / `commit-model` / `diff-head` / `models` /
+  `pull` / `push` / `suggest-message`），而本插件只注册了 fs 8 / git 13。**判据是「这个端点碰不碰路径或仓库」**：
+  必须接管的 6 个 —— `fs.createFile`（`cwdOf` + `createWorkspaceFile({cwd,path,name})`；不接管就只在镜像里建空文件，
+  远端永远没有）、`git.blame` / `git.diff-head`（`ensureWorkspacePath` + `runGit(repoRoot(cwd))`）、
+  `git.worktrees`（0.24.1 就有、此前也漏了）、`git.pull` / `git.push`（`runGit(repoRoot, ["pull","--ff-only"] /
+  ["push"])`，会在镜像那个跟远端无关的仓库上动）；**不必接管**的 3 个 —— `git.models` 走 `ctx.get("llm")` 列
+  provider、`git.commit-model` 只出现在客户端、`git.suggest-message` 虽然读 `status(cwd)` 但只用于生成提交信息
+  （已知小瑕疵：它取的是镜像状态）。
+  2.4.28 已接管这 6 个，并把对拍**自动化**：`tests/sidebar-0250-endpoints.test.mjs` 的 C8/C9 会读本机
+  `~/.dsh/profiles/*/node_modules/dsh-better-sidebar/lib/index.js`（没装则 SKIP、不算失败），把宿主键集合与本插件
+  注册集合逐项比对 —— **升级 better-sidebar 之后跑一次全量测试即可**，不必再手抄键名。同一个文件的 D 段还做
+  **语义差分对拍**：把上游的 `assertCreatableFileName` / `isoWithOffset` / `parseBlamePorcelain` / `parseWorktreeList`
+  用 `grabFn` 式切片抽出来，与本插件实现喂同一批输入、逐条比较（含拒绝文案）—— 注册齐了但语义走样同样会红。
+  该测试还钉住三条容易重犯的事：
+  ① 模型类端点**不许**进 `GIT_METHODS`（它们不碰路径，注册反而剥夺上游能力）；② `git.worktrees` 这类"每个条目各有
+  自己的根"的端点必须用**条目自己的目录**跑命令（复用会话 cwd 的 `run` 会把 status 跑错目录）—— 断言 `runGitRemote`
+  收到的是 `/remote/wt2` 而不是会话/镜像目录；③ "已存在"=409、"形状不对"=400+`bad-request`（本地分支曾一律给
+  400 + `fs-error`，连自己的远程分支都不一致）。
+  **远端建空文件用 `(set -C; : > <path>)`（noclobber）**：探测与创建之间若有人抢先建了同名文件，这里只会失败，
+  不会清空别人的文件（对齐上游 `writeFile(…, {flag:"wx"})` 的语义）；本地分支用 `writeFile(dest, "", {flag:"wx"})`。
+  `git.pull` 成功后要做两件事：整棵远端列举缓存失效（工作树可能变了）+ 清掉写回桥的**远端指纹**记录
+  （`freshnessForgetProfile`）—— 那些记录描述的是 pull 之前的远端内容，留着会让下一次写回被误判成"远端已改动"而拒写。
   **重构会让老的形状断言失效**：`fs-trees-contract` / `open-external-contract` 里 5 条断言指向被改掉的代码文本 ——
   这时要先判断"它保护的**契约**变了没有"（本次都没变，只是变量名/新增了归一这一步），再改断言指向新代码，
   **不要直接删**，也不要为了让测试变绿而放宽契约。
