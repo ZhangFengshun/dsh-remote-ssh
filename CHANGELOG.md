@@ -2,6 +2,23 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.29] — 远程工作区判定改为按工作区根**前缀**匹配（真机验证 2.4.28 时发现的边界）
+
+### 修复
+- **远程工作区的判定此前只认"正好放着 `.remote-ssh.json` 的那一级目录"**：`readRemoteInfoSync(p)` 的实现就是 `readFileSync(join(p, ".remote-ssh.json"))`，**不向上遍历**。真实客户端总带有效 `sessionId`（会话 cwd 就是镜像根）所以一直没暴露，但两种情况会漏判，而漏判的后果是**写/删静默落在本地镜像上**（与 2.4.27 修的 issue #25 同源）：
+  - ① 会话是在工作区的**子目录**里启动的（会话 cwd 是子目录，不是镜像根）；
+  - ② 客户端带了**过期/未知 `sessionId`**，判定回退到 `payload.path`，而它可能是工作区根之下的任意层级。
+  - **发现过程**：2.4.28 真机验证时，用过期 sessionId + 工作区根之下的绝对路径调 `fs.remove` → `400 ENOENT … lstat '<镜像路径>'`（远端什么都没动，本地镜像里也没有这个文件）；换成真实 sessionId 同一请求 → 200 且远端文件消失。由此定位到判定方式。
+  - **修法**：新增 `remoteWorkspaceForPath(absPath)` —— 复用已有的 `matchRemoteWorkspace`（它本来就是**前缀**匹配）把任意绝对路径匹配到已注册工作区，再取该工作区根下的 `.remote-ssh.json`。fs 处理器的两条判定路径（会话 cwd、`payload.path`）都改走它；`@` 引用补全（`remoteRefListForAgent`）同样改走它 —— 它在会话 cwd 是子目录时会退回本地实现，只能搜到镜像目录（正是 issue #10 的现象）。
+- **判定命中时必须以"工作区根"当 remoteBase，不能用传进来的那条更深路径**：`localToRemote()` 是"剥掉镜像前缀再拼远端根"，基准传成子目录就会把文件映射到远端**错误的位置**（`<root>/nested/x` 而不是 `<root>/sub/deep/nested/x`）。子目录会话 + 相对路径这条组合此前会踩到。
+- **镜像根之下、但不属于任何已注册工作区的路径现在明确报错，而不是当成本地路径操作**：新增 `isUnderMirrorBase()` + fs 处理器的报错分支（读写都报，`400 bad-request`，文案说清"在镜像目录下 / 不属于已注册工作区"）。这类路径（工作区被移除、镜像成了孤儿、sessionId 过期）**不可能是**合法的本地目标，静默在镜像上读写就是错位。
+- `mirrorBaseDir()` 集中镜像根（`<home>/.dsh/remote-workspaces`）的构造，镜像目录创建与判定共用一处，避免两边各写一遍后漂移。
+
+### 测试
+- 新增 `tests/remote-workspace-root.test.mjs`（**39 条断言，0 失败**）：A 段 `isUnderMirrorBase` 真值表（含"镜像根名多一段"的边界与 Windows/POSIX 大小写口径）；B 段**真实处理器**行为 —— 深层文件 `fs.remove` 走远端且远端命令是**完整正确**的远端路径、深层目录 `createFile`、子目录会话 + 相对路径的映射、未注册镜像路径的读/写都报错且 canary 文件**原封不动**、真正本地路径行为不变、`@` 引用补全列出的是**对应的远端子目录**；C 段接线 + "关键路径上不能再有只精确匹配的判定"。判定相关的函数全部使用**真实源码**（不 stub），避免拿被 mock 掉的逻辑自证。
+- **变异负向控制 7 个**（各自独立副本，工作树不动）：remoteBase 换回深路径 → 6 条红；只废会话 cwd 那一路 → 3 条红（B7 + 接线）；只废 `payload.path` 那一路 → 1 条红（两路互为冗余，属设计意图）；两路都废 → 7 条红；去掉镜像越界报错 → 3 条红（含 canary）；`@` 引用退回精确匹配 → 3 条红；越界判定去掉目录边界 → 1 条红。全部命中预期断言，无"怎么写都过"的断言。
+- **真机回归**：用过期 sessionId + 工作区根之下的绝对路径重跑此前失败的那一步（`fs.remove`）、以及真实 sessionId 的 `createFile` → `fs.remove` 往返，远端文件消失、本地镜像干净、远端 `git status` 计数与 HEAD 均回到初始值。
+
 ## [2.4.28] — 接管 better-sidebar 0.25.0 新增的 6 个端点（fs.createFile / git.blame / diff-head / worktrees / pull / push）
 ### 修复
 - **本机 profile 里的 `dsh-better-sidebar` 从 0.24.1 升到 0.25.0，新增 9 个端点，其中 6 个与仓库/路径相关 —— 本插件此前没有注册它们**（不是用户报的 issue，是维护笔记里"升级 better-sidebar 后必做对拍"这条硬规则查出来的）。本插件用 `kind: "exact"` 接管 `/sidebar/api/fs.*` 与 `git.*`，**没注册的端点会回落到上游实现**，而远程工作区里上游拿到的 cwd 是**本地镜像目录**：

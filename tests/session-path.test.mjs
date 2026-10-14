@@ -85,13 +85,19 @@ function fsSandbox(sessionDir) {
     'join', 'dirname', 'basename', 'stat', 'open', 'readFile', 'writeFile', 'rename', 'rm', 'mkdir',
     'opendir', 'lstat', 'existsSync', 'homedir', 'READ_LIMIT', 'LIST_LIMIT',
     'ctx', 'requestTrust', 'denyRequest', 'writeJson', 'writeOk', 'readJsonBody',
-    'readRemoteInfoSync', 'localSearchFiles',
+    'readRemoteInfoSync', 'localSearchFiles', 'settingsFace',
     MODULE_HELPERS + '\n' +
     grab(src, 'function readPathsField') + '\n' +
     grab(src, 'function sidebarEntriesFrom') + '\n' +
     grab(src, 'function toPosixRelative') + '\n' +
     grab(src, 'function fsSearchResult') + '\n' +
     grab(src, 'function sessionCwdFrom') + '\n' +
+    // 2.4.29 起 fs 判定改走"按工作区根前缀匹配"，这几个真源码必须一起进沙箱。
+    // settingsFace 的工作区列表为空 → 匹配不到任何工作区 → 行为与之前一致（一律本地分支）。
+    grab(src, 'function mirrorBaseDir') + '\n' +
+    grab(src, 'function isUnderMirrorBase') + '\n' +
+    grab(src, 'function matchRemoteWorkspace') + '\n' +
+    grab(src, 'function remoteWorkspaceForPath') + '\n' +
     grab(src, 'async function localReadText') + '\n' +
     grab(src, 'async function localWriteFile') + '\n' +
     grab(src, 'async function localListDir') + '\n' +
@@ -105,7 +111,8 @@ function fsSandbox(sessionDir) {
     opendir, lstat, existsSync, homedir, 524288, 1000,
     makeCtx(sessionDir), requestTrust, denyRequest, writeJson, writeOk, readJsonBody,
     () => null,                       // readRemoteInfoSync → 一律本地分支
-    async () => ({ entries: [], truncated: false })  // localSearchFiles → 本测试不查内容
+    async () => ({ entries: [], truncated: false }),  // localSearchFiles → 本测试不查内容
+    { read: () => ({ workspaces: [] }) }              // settingsFace → 没有已注册的远程工作区
   )
   return { api: fn, rec }
 }

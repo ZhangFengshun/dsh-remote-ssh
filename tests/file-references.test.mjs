@@ -142,21 +142,30 @@ console.log('A5 · 索引命令生成')
 console.log('B · 服务包装（远程走 SSH / 本地委托 / 异常降级）')
 {
   const wrapperCode = [
+    // 2.4.29 起 remoteRefListForAgent 走"按工作区根前缀匹配"，这几个真源码必须一起进沙箱
+    // （判定相关函数一律用真实实现，不 stub —— 否则是在拿被 mock 掉的逻辑自证）。
+    grab('function isAbsoluteLocalPath'),
+    grab('function matchRemoteWorkspace'),
+    grab('function remoteWorkspaceForPath'),
+    grab('function localToRemote'),
     grab('async function remoteRefListForAgent'),
     grab('function installFileReferenceBridge'),
   ].join('\n')
 
-  // 桩：remoteRefList / readRemoteInfoSync / getProfile
+  // 桩：remoteRefList / readRemoteInfoSync / settingsFace / getProfile
   const mk = (opts) => {
     const calls = { original: 0, remote: 0 }
     const f = new Function('stub', wrapperCode + `
       const remoteRefList = stub.remoteRefList;
       const readRemoteInfoSync = stub.readRemoteInfoSync;
+      const settingsFace = stub.settingsFace;
       const getProfile = stub.getProfile;
       return { remoteRefListForAgent, installFileReferenceBridge };`)
     const mod = f({
       remoteRefList: async (profile, root, query) => { calls.remote++; if (opts.remoteThrows) throw new Error('ssh down'); return opts.remoteResult || [] },
       readRemoteInfoSync: (cwd) => (opts.remote ? { profileId: 'p1', host: 'h', user: 'u', keyPath: 'k', remotePath: '~/work/my-project' } : null),
+      // 已注册工作区：镜像根就是会话 cwd（真实客户端里会话 cwd 即镜像根）
+      settingsFace: { read: () => ({ workspaces: opts.remote ? [{ mirrorPath: '/mirror/wmirror2' }] : [] }) },
       getProfile: (id) => (id === 'p1' ? { id: 'p1', host: 'h', user: 'u' } : undefined),
     })
     return { mod, calls }

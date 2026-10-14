@@ -193,8 +193,13 @@ function fsSandbox(opts) {
     'opendir', 'lstat', 'existsSync', 'homedir', 'READ_LIMIT', 'LIST_LIMIT',
     'ctx', 'requestTrust', 'denyRequest', 'writeJson', 'writeOk', 'readJsonBody',
     'readRemoteInfoSync', 'localSearchFiles', 'getProfile', 'localToRemote', 'shellQuotePath',
-    'runPooled', 'invalidateRemoteCaches',
+    'runPooled', 'invalidateRemoteCaches', 'settingsFace',
     PATH_HELPERS + '\n' + NEW_HELPERS + '\n' +
+    // 2.4.29 起 fs 判定按"工作区根前缀"匹配：这几个真源码必须一起进沙箱（不 stub 判定逻辑）。
+    grab(src, 'function mirrorBaseDir') + '\n' +
+    grab(src, 'function isUnderMirrorBase') + '\n' +
+    grab(src, 'function matchRemoteWorkspace') + '\n' +
+    grab(src, 'function remoteWorkspaceForPath') + '\n' +
     grab(src, 'function readPathsField') + '\n' +
     grab(src, 'function sidebarEntriesFrom') + '\n' +
     grab(src, 'function toPosixRelative') + '\n' +
@@ -228,7 +233,9 @@ function fsSandbox(opts) {
       if (/set -C/.test(cmd)) return { ok: true, stdout: '', stderr: '' }
       return { ok: true, stdout: '', stderr: '' }
     },
-    (p, path, o) => { rec.invalidations.push([path, o]) }
+    (p, path, o) => { rec.invalidations.push([path, o]) },
+    // 已注册工作区：remote 模式下把会话镜像根注册进去（真实客户端里 sessionId → 会话 cwd = 镜像根）
+    { read: () => ({ workspaces: remote ? [{ mirrorPath: sessionDir }] : [] }) }
   )
   return { handler: fn, rec }
 }
