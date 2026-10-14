@@ -320,6 +320,30 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
   不会清空别人的文件（对齐上游 `writeFile(…, {flag:"wx"})` 的语义）；本地分支用 `writeFile(dest, "", {flag:"wx"})`。
   `git.pull` 成功后要做两件事：整棵远端列举缓存失效（工作树可能变了）+ 清掉写回桥的**远端指纹**记录
   （`freshnessForgetProfile`）—— 那些记录描述的是 pull 之前的远端内容，留着会让下一次写回被误判成"远端已改动"而拒写。
+  **🧭 真机验证 2.4.28 的实据（2026-10-14，宿主重启后进程全为 10:18:45 启动）**：直接对
+  `POST http://127.0.0.1:<port>/sidebar/api/<method>` 发请求（body `{sessionId, cwd|path}`，与本插件注册的 exact 路由同形）：
+  ① `git.worktrees`（真实 sessionId）→ `/data/run01/<user>/zfs/codex/DFS-Dev`、`current: true`、`changes: 27` ——
+  **远端绝对路径**只可能来自远端分支（镜像里没有 `.git`，上游实现只会给 `[]`），这是"新端点已接管且跑在远端"的硬证据；
+  ② `git.blame Project.toml 1-5` → 真实作者/时间（`+08:00` 偏移）/中文 summary，且同一 commit 的后 4 行复用首块信息
+  （porcelain 语义在真实数据上成立）；③ `git.diff-head` 返回 `{diff:"\n"}` —— 与**既有** `git.diff` 对同一干净文件的返回
+  完全一致，说明多出的那个换行是远端运行器的既有归一，不是 0.25.0 新端点引入的；④ `fs.createFile` 非法名 → 400 +
+  `bad-request`（上游文案）；正常创建 → 200，文件**真的在远端**（SSH `stat` 0 字节）且**本地镜像里没有**（只写远端）；
+  同名再建 → 409；⑤ `changes` 27→28→27 与**我用自己 SSH 数出来的 27/28/27 完全一致**（`countStatusEntries` 口径正确）；
+  ⑥ `fs.remove` 往返后远端文件消失、镜像干净、git HEAD/分支/worktree 列表未动。
+  **验证纪律**：插件报告 ≠ 事实 —— 写完必须用**自己的 SSH**独立核对，核对完清理到原状（远端 status 计数与
+  `git rev-parse HEAD` 都要回到初始值）。
+  **找"活的" sessionId 的办法**：`<DSH_HOME>\sessions\--<workspace-slug>--\` 下的目录名即历史 sessionId，
+  但只有**宿主注册表里仍在的**才可用 —— 探测方式是发一次只读的 `git.worktrees`：能解析的返回远端路径，不能解析的
+  **如实报错**（"无法确定会话工作目录…"），这本身也是 2.4.27"绝不猜 `process.cwd()`"的行为。
+  **⚠️ 远端判定只认"正好放着 `.remote-ssh.json` 的那一级目录"（实测，未来加固的候选）**：
+  `readRemoteInfoSync(p)` 的实现就是 `JSON.parse(readFileSync(join(p, ".remote-ssh.json")))` —— **不向上遍历**。
+  真实客户端总带有效 `sessionId`，而会话 cwd 就是**镜像根**，所以永远命中；但**回退路径**（取不到会话 cwd 时改用
+  `payload.path` 判定）只有当客户端给的正好是**工作区根**（或某个自带 `.remote-ssh.json` 的目录）时才命中。
+  实测：假 sessionId + 绝对**文件**路径 → `fs.remove` 落进**本地分支**，报 `400 ENOENT … lstat '<镜像路径>'`
+  （远端什么都没动 —— 是"删不掉"，不是"删错地方"）；换成真实 sessionId 后同一请求 → 200 且远端文件消失。
+  风险点：若客户端带着**过期/未知** sessionId 发来镜像根**之下**的绝对路径，`fs.write` / `fs.remove` 会**静默作用于镜像**
+  而不是报错 —— 与 2.4.27 修的那类"落到错误位置"同源。加固方向二选一：向上遍历找到工作区根，或在"绝对路径 + 无法确定
+  会话 cwd + 该路径可能属于某个镜像"时**明确报错**；两者都要新的小版本 + 一轮真机回归。
   **重构会让老的形状断言失效**：`fs-trees-contract` / `open-external-contract` 里 5 条断言指向被改掉的代码文本 ——
   这时要先判断"它保护的**契约**变了没有"（本次都没变，只是变量名/新增了归一这一步），再改断言指向新代码，
   **不要直接删**，也不要为了让测试变绿而放宽契约。
