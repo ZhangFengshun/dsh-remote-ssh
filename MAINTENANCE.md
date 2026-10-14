@@ -7,7 +7,7 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本地版本 / npm latest / GitHub main | 2.4.27（已发布并推送、已装进桌面 profile；**需重启 DSH 才生效**）；工作树正在做 2.4.28（better-sidebar 0.25.0 新增 6 个端点接管，未发布） |
+| 本地版本 / npm latest / GitHub main | **2.4.28**（2026-10-14 发布）：npm `dist-tags.latest`、tag `v2.4.28`、GitHub Release 三者一致，commit `d0ce933`；已装进桌面 profile（`lib/index.js` 328,826 字节 / SHA256 `62B7288892347A10270AE5926765237E692ADFFF5FE2FA1A13C119036787A32C`，与 npm 产物同哈希）。**需重启 DSH 才生效** |
 | 仓库 | https://github.com/ZhangFengshun/dsh-remote-ssh（HTTPS，分支 main） |
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
