@@ -39,6 +39,10 @@ const check = (cond, label) => { if (cond) { pass++; console.log('  ✓ ' + labe
 
 const PATH_HELPERS = [
   grab(src, 'function isAbsoluteLocalPath'),
+  // 2.4.30（issue #26）：fs 处理器改为按请求路径**语法 + 归属**分派，沙箱必须带上这两个纯函数，
+  // 否则沙箱里跑真实处理器会 "classifyRequestPathSyntax is not defined"（那是沙箱缺件，不是被测行为）。
+  grab(src, 'function classifyRequestPathSyntax'),
+  grab(src, 'function looksLikeRemoteAbsolutePath'),
   grab(src, 'function resolveSessionPath'),
   grab(src, 'function unresolvedPathMessage')
 ].join('\n')
@@ -244,17 +248,20 @@ console.log('\nB5. @ 引用补全（会话 cwd 是子目录时也要走远端）
 // ---------------------------------------------------------------------------
 console.log('\nC. 接线与快照')
 check(/function remoteWorkspaceForPath\(/.test(src), 'C1 remoteWorkspaceForPath 存在')
-check(/const matchedHint = remoteWorkspaceForPath\(workdirHint\)/.test(src), 'C2 fs 判定对会话 cwd 走前缀匹配')
-check(/const matchedProbe = remoteWorkspaceForPath\(probePath\)/.test(src), 'C3 fs 判定对 payload.path 走前缀匹配')
-check(/let remoteBase = matchedHint \? matchedHint\.root : workdirHint/.test(src), 'C4 remoteBase 取**工作区根**（不是更深的那条路径）')
-check(/isUnderMirrorBase\(probePath\)/.test(src), 'C5 未注册镜像路径有明确报错分支')
+check(/const sessionHit = sessionCwd !== "" \? remoteWorkspaceForPath\(sessionCwd\) : null;/.test(src), 'C2 fs 判定对会话 cwd 走前缀匹配（2.4.30 起只是两个输入之一）')
+check(/const hit = remoteWorkspaceForPath\(raw\);/.test(src), 'C3 fs 判定对**每条**请求路径走前缀匹配')
+check(/remoteBase = hit\.root;/.test(src) && /remoteBase = sessionHit\.root;/.test(src), 'C4 remoteBase 取**工作区根**（不是更深的那条路径）')
+check(/isUnderMirrorBase\(raw\)/.test(src) && /ownerships\.indexOf\("mirror-orphan"\)/.test(src), 'C5 未注册镜像路径有明确报错分支（按每条路径判定）')
 check(/const matched = remoteWorkspaceForPath\(cwd\)/.test(src), 'C6 @ 引用补全同样用前缀匹配')
 check(/join\(mirrorBaseDir\(\), wsId\)/.test(src), 'C7 镜像目录构造与判定共用 mirrorBaseDir()')
 check(/function mirrorBaseDir\(\) \{\s*return join\(homedir\(\), "\.dsh", "remote-workspaces"\)/.test(src), 'C8 mirrorBaseDir 就是 ~/.dsh/remote-workspaces')
-// 关键路径上不能再有"只精确匹配"的判定
-const gateRegion = src.slice(src.indexOf('async function interceptFsHandler'), src.indexOf('async function interceptFsHandler') + 4200)
+// 关键路径上不能再有"只精确匹配"的判定：窗口精确到 fs 处理器本体（到它后面第一个 async function 为止），
+// 这样既不会漏（旧写法用的是固定 4200 字符窗口），也不会把后面其它端点的注释算进来。
+const gateStart = src.indexOf('async function interceptFsHandler')
+const gateEnd = src.indexOf('\n  async function ', gateStart + 10)
+const gateRegion = src.slice(gateStart, gateEnd > gateStart ? gateEnd : gateStart + 6000)
 const exactCalls = [...gateRegion.matchAll(/readRemoteInfoSync\((?!ws\.mirrorPath)/g)].length
-check(exactCalls === 1, 'C9 fs 判定里只剩 1 处精确匹配（镜像根之外的兜底），不再拿会话 cwd / 深层路径去精确匹配：' + exactCalls)
+check(exactCalls === 2, 'C9 整个 fs 处理器里精确匹配只剩 2 处（都用于「目录自带 .remote-ssh.json」的兜底），不再拿会话 cwd / 深层路径去精确匹配：' + exactCalls)
 check(new RegExp('## \\[' + pkg.version.replace(/\./g, '\\.') + '\\]').test(changelog), 'C10 CHANGELOG 有当前版本条目（' + pkg.version + '）')
 
 try { rmSync(base, { recursive: true, force: true }) } catch (e) {}

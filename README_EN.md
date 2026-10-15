@@ -46,7 +46,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.29
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.30
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -265,6 +265,7 @@ The plugin never patches DSH sources or injects into the profile dependency tree
 | **In a remote workspace, a file you wrote or deleted never reaches the remote, or you get `400 ENOENT … lstat '<mirror path>'`; sessions started in a **subdirectory** hit this most often** | **Fixed in 2.4.29**. Remote-workspace detection only recognised "the one directory that literally holds `.remote-ssh.json`" (`readRemoteInfoSync` does **not** walk upwards): real clients always send a valid `sessionId` (the session cwd is the mirror root), so this stayed hidden — but it misses when ① the session was started in a **subdirectory** of the workspace, or ② the client sends a **stale/unknown `sessionId`**, in which case detection falls back to the request's `path`. A missed detection makes writes/deletes land **silently on the local mirror**. Since 2.4.29 detection matches by **workspace-root prefix** (which also fixes the mapping bug where a deeper path used as the base produced a remote path with a missing segment; `@` file-reference completion benefits too). In addition, a path **under the mirror directory that belongs to no registered workspace** now **fails loudly** (reads and writes) instead of being treated as a local path. Upgrade to **2.4.29** and restart DSH |
 | A command hangs forever | The 120s timeout discards the pooled session automatically; use `timeoutMs: 0` for long jobs and `remote_ssh_kill` at any time |
 | Large files are truncated | 4MB per read, ≈6.29MB on the pooled download path (larger files fall back to a one-shot connection); use `remote_ssh_exec` with `head`/`tail` to page through |
+| **In a remote-workspace session a local absolute path cannot be read, and write/delete land on the remote; or a remote absolute path (`/mnt/...`, `/tmp/x.log`) never opens** | **Fixed in 2.4.30 (issue #26)**. The remote-vs-local decision used to look only at the **session cwd**: a remote-workspace session pushed the whole request into the remote branch. So ① a local absolute path was sent to the remote as `<remoteRoot>/Users/...` — reads reported `No such file`, and **if the remote happened to have that path, a different file was returned silently**, while `fs.write` never reached the local disk and `fs.remove`/`fs.rename` hit the remote; ② a remote absolute path was treated as relative and re-prefixed (`<root><root>/...`). Now every **request path** decides on its own: mirror member → mapped to the remote; drive letter / UNC (including `C:foo`) → **local**, even in a remote session; `/...` remote absolute → **passed through verbatim**; relative → resolved against the session cwd; mixing local with remote/mirror paths in one request → explicit `400`. The silent `localToRemote()` fallback was also raised from `debug` to `warn`. |
 
 ## How It Works
 

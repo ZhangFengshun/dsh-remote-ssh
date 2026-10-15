@@ -215,7 +215,7 @@ console.log('C2 · 两条分支都必须实现 fs.trees / fs.mkdir')
   const localTrees = src.slice(localIdx, src.indexOf('// fs.rename / fs.remove', localIdx))
   check(remoteTrees.includes('readPathsField(payload)') && remoteTrees.includes('400'), '远程 fs.trees：字段校验 + bad-request')
   check(remoteTrees.includes('remoteListDirsBatch(runPooled, profile'), '远程 fs.trees：批量远端列举')
-  check(remoteTrees.includes('localToRemote(lp, remoteBase, remoteInfo.remotePath)'), '远程 fs.trees：镜像路径 → 远端路径')
+  check(remoteTrees.includes('remotePathForRequest(lp)'), '远程 fs.trees：镜像路径 → 远端路径（2.4.30 起统一经 remotePathForRequest 映射）')
   check(remoteTrees.includes('sidebarEntriesFrom(lvl.entries, r.path)') && remoteTrees.includes('path: r.path'), '远程 fs.trees：levels 形状与上游一致')
   check(localTrees.includes('localListDir(r.path, LIST_LIMIT)') && localTrees.includes('levels: levels'), '本地 fs.trees：本地工作区不能 404（否则本地会话反而被弄坏）')
 
@@ -230,7 +230,7 @@ console.log('C2 · 两条分支都必须实现 fs.trees / fs.mkdir')
 
 console.log('C3 · 远程工作区探测：fs.trees 没有 path 字段，用 paths[0] 兜底')
 {
-  check(src.includes('Array.isArray(payload.paths) && typeof payload.paths[0] === "string"'), 'sessionCwd 为空时用第一条路径探测 .remote-ssh.json')
+  check(src.includes('Array.isArray(payload.paths)') && src.includes('ownerships.indexOf("mirror")'), 'sessionCwd 为空时按 paths[] 里**每条**路径的归属判定（不再只看 paths[0]）')
 }
 
 console.log('C4 · 版本与文档')

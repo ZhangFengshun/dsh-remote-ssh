@@ -51,6 +51,10 @@ const check = (cond, label) => { if (cond) { pass++; console.log('  ✓ ' + labe
 // ---------------------------------------------------------------------------
 const MODULE_HELPERS = [
   grab(src, 'function isAbsoluteLocalPath'),
+  // 2.4.30（issue #26）：fs 处理器改为按请求路径**语法 + 归属**分派，沙箱必须带上这两个纯函数，
+  // 否则沙箱里跑真实处理器会 "classifyRequestPathSyntax is not defined"（那是沙箱缺件，不是被测行为）。
+  grab(src, 'function classifyRequestPathSyntax'),
+  grab(src, 'function looksLikeRemoteAbsolutePath'),
   grab(src, 'function resolveSessionPath'),
   grab(src, 'function unresolvedPathMessage')
 ].join('\n')
@@ -356,8 +360,8 @@ console.log('\nC. 接线与文档')
   check(fileHandler.includes('unresolvedPathMessage(rawPath, cwd, localPath.reason)'), 'C8 /sidebar/file 解析失败时报可读错误')
   check(gitHandler.includes('无法确定会话工作目录'), 'C9 git 处理器在拿不到会话 cwd 时给出明确错误')
   check(openHandler.includes('resolveSessionPath(rawRevealPath, revealBase)'), 'C10 open.external reveal 先归一再打开')
-  check(fsHandler.includes('if (!remoteInfo && probePath && isAbsoluteLocalPath(probePath))'),
-    'C11 相对路径不再参与"这是不是一个远程工作区"的探测')
+  check(fsHandler.includes('if (syn === "relative") return "relative";'),
+    'C11 相对路径在探测工作区**之前**就被分类掉，不参与"这是不是一个远程工作区"的判定')
   check((src.match(/function isAbsoluteLocalPath\(/g) || []).length === 1, 'C12 绝对路径判断只有一份实现（原来 apply 内那份已收敛）')
   check((src.match(/function sessionCwdFrom\(/g) || []).length === 1, 'C13 会话 cwd 的取法只有一份实现')
   check(fsHandler.includes('resolveSessionPath(raw, pathBase)'), 'C14 fs.trees 逐条归一')

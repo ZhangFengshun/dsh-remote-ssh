@@ -57,6 +57,10 @@ const NEW_HELPERS = (() => {
 // issue #25 (2.4.27) 引入的路径归一helper，处理器沙箱还要用
 const PATH_HELPERS = [
   grab(src, 'function isAbsoluteLocalPath'),
+  // 2.4.30（issue #26）：fs 处理器改为按请求路径**语法 + 归属**分派，沙箱必须带上这两个纯函数，
+  // 否则沙箱里跑真实处理器会 "classifyRequestPathSyntax is not defined"（那是沙箱缺件，不是被测行为）。
+  grab(src, 'function classifyRequestPathSyntax'),
+  grab(src, 'function looksLikeRemoteAbsolutePath'),
   grab(src, 'function resolveSessionPath'),
   grab(src, 'function unresolvedPathMessage')
 ].join('\n')
