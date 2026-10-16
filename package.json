@@ -24,6 +24,9 @@
     "url": "https://github.com/ZhangFengshun/dsh-remote-ssh/issues"
   },
   "type": "module",
+  "scripts": {
+    "test": "node tests/run-all.mjs"
+  },
   "main": "lib/index.js",
   "exports": {
     ".": {

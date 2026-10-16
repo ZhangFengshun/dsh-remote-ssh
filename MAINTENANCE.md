@@ -103,6 +103,17 @@ fs 处理器**不再用会话 cwd 决定"这次请求走不走远端"**，而是
 
 ```powershell
 cd C:\Users\Administrator\Desktop\temp\ChatGPTProProject\dsh-remote-ssh
+# 0. 改前先跑基线、改后再跑一次：npm test
+#    （= node tests/run-all.mjs，聚合运行器：28 个文件 / 1469 断言，约 7~13 秒；
+#     缺本机上游包时对拍断言自动跳过 → 1465，CI 里会把上游装上去所以是满额 1469）
+# 0b. 【待解锁后才生效】push 之后 GitHub Actions 会自己再跑一遍：workflows/tests.yml
+#     （windows-latest + Node 22 + 钉版上游 0.26.1）；另有 workflows/upstream-drift.yml 每周一
+#     03:00 UTC 用 @latest 跑 —— **它红了就是上游发了新端点**，按「升级 better-sidebar 后必做对拍」
+#     接管，别去改断言让它变绿。
+#     这两个 yml 目前**还没在仓库里**：当前 push 凭据是 OAuth App，没有 workflow scope，GitHub 会拒绝
+#     任何 .github/workflows/* 的新增/修改（refusing to allow an OAuth App to create or update workflow
+#     ... without `workflow` scope）。解锁一次：gh auth refresh -h github.com -s workflow，
+#     然后把工作流文件放回 .github/workflows/ 再 push。在此之前**发布前必须本地跑 npm test**。
 # 1. 改代码 + 升 package.json version + 更新 CHANGELOG.md（版本段 + 修复/性能数据）
 # 2. 提交 + 推送 + 发布（一条命令串行）：
 git add -A
