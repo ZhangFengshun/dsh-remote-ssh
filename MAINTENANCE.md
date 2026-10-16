@@ -7,7 +7,7 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本地版本 / npm latest / GitHub main | **2.4.30**（2026-10-15 发布，修复 issue #26）：npm `dist-tags.latest`、tag `v2.4.30`、GitHub Release（Latest）三者一致，commit `1642495`（npm tarball shasum `48258ae3dae326ce9d3d499a5828af0264c4b820`，8 个文件）；仓库与 npm 产物里的 `lib/index.js` 同为 SHA256 `0BC28D46615C8FF2054FEDD1D2C88BD5BA560B8A6AE734971EA6978F92E0ED47`。**桌面 profile 仍是 2.4.29**（`6E909882…`），未按本次授权更新 —— 要装 2.4.30 需另行确认。**需重启 DSH 才生效** |
+| 本地版本 / npm latest / GitHub main | **2.4.31**（2026-10-16 发布，修复 issue #27 + 接管 better-sidebar 0.26.1 的 `fs.readPage`）：npm `dist-tags.latest`、tag `v2.4.31`、GitHub Release（Latest）三者一致，commit `80448f6`（npm tarball shasum `0f6329348f27f277cc4870b4d8d00e0a1ff30a70`，8 个文件）；仓库与 npm 产物里的 `lib/index.js` 同为 SHA256 `0515EF92B1C24675BB4809D49ED333E790EA9679EF0F67E82A8357602E0D671E`（已回下载逐字节比对）。issue #27 已回复并关闭（`stateReason=COMPLETED`，open issues = 0）。**桌面 profile 已就地升级到 2.4.31**（依赖号同步；未跑 pnpm；备份 `_hotfix-backup\profile-desktop-20261016192657\`）—— **需重启 DSH 才生效** |
 | 仓库 | https://github.com/ZhangFengshun/dsh-remote-ssh（HTTPS，分支 main） |
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
@@ -23,6 +23,7 @@
 
 1. **行尾**：本仓 `core.autocrlf=true`，`git stash`/`git checkout`/`git show >` 都可能把 `lib/index.js` 变成 CRLF；而多个测试用含 `\n` 的标记切片源码，换行被改写会**整文件抛错**（不是断言失败，是异常，会掩盖同一文件里其它断言）。改完 `lib/` 下的文件后核一下「CRLF 行数应为 0」，或后续加 `.gitattributes`（`*.js text eol=lf`）一次性消除。注意 `README.md`/`README_EN.md` 本身就是 CRLF，改这两个文件要按它们自己的行尾写。
 2. **断言要能在坏状态下报红、而不是抛错**：`r.body.value.xxx` 这种直接解引用在失败路径上会抛 `TypeError`，把后面所有断言一起吞掉（只有变异控制才暴露得出来）。统一写 `!!r.body.value && r.body.value.xxx === …`。
+
 ### 路径归属规则（2.4.30 起，issue #26）
 
 fs 处理器**不再用会话 cwd 决定"这次请求走不走远端"**，而是逐条判每个请求路径（`payload.path` 与 `payload.paths[]`）的归属：
@@ -153,6 +154,11 @@ dsh plugin --profile desktop add @zhangfengshun/dsh-remote-ssh@<版本>
    `https://registry.npmjs.org/@scope%2Fpkg/2.4.18` 返回 200、`dist-tags.latest` 跟上** —— 即暂存件被
    推广为正式版本，**无需重新发布**。结论：**发布后先用"版本级 URL"确认，别急着重发**；
    重发只会得到 409。真正需要人工介入（OTP/网页批准）时，npm 会明确要求 one-time password。
+   - **2026-10-16 发布 2.4.31 复现同一现象，并定位到"误判来源"**：`npm publish` 报成功（`+ @scope/pkg@2.4.31`）后
+     **`npm view <pkg>@2.4.31` 连续 11 次（约 3.5 分钟）都返回 E404，`npm view version` 也仍是上一版** —— 因为 `npm view` 读的是
+     **本地 packument 缓存**。同一时刻 `curl.exe -s -o body -w "%{http_code}" -H "Cache-Control: no-cache"
+     https://registry.npmjs.org/<scope>%2F<pkg>/2.4.31` 已返回 **200**、`dist-tags.latest` 已指向 2.4.31（发布到可见约 4 分钟）。
+     结论：**核对一律用带 `Cache-Control: no-cache` 的 curl 直连注册表，不要用 `npm view`**（它会让你以为发布失败而重发，重发只会得到 409）。
 
 7. **改文档/版本号一律用编辑器工具，不要用 PowerShell 做文本往返（2026-10-11 踩到，一次废掉两个 README）**：
    本机 DSH 的 `pwsh` 工具实际是 **Windows PowerShell 5.1**（`5.1.26100.9568`），它的
