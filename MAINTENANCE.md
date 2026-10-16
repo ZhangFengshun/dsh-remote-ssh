@@ -7,12 +7,26 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本地版本 / npm latest / GitHub main | **2.4.31**（2026-10-16 发布，修复 issue #27 + 接管 better-sidebar 0.26.1 的 `fs.readPage`）：npm `dist-tags.latest`、tag `v2.4.31`、GitHub Release（Latest）三者一致，commit `80448f6`（npm tarball shasum `0f6329348f27f277cc4870b4d8d00e0a1ff30a70`，8 个文件）；仓库与 npm 产物里的 `lib/index.js` 同为 SHA256 `0515EF92B1C24675BB4809D49ED333E790EA9679EF0F67E82A8357602E0D671E`（已回下载逐字节比对）。issue #27 已回复并关闭（`stateReason=COMPLETED`，open issues = 0）。**桌面 profile 已就地升级到 2.4.31**（依赖号同步；未跑 pnpm；备份 `_hotfix-backup\profile-desktop-20261016192657\`）—— **需重启 DSH 才生效** |
+| 本地版本 / npm latest / GitHub main | **2.4.31**（2026-10-16 发布，修复 issue #27 + 接管 better-sidebar 0.26.1 的 `fs.readPage`）：npm `dist-tags.latest`、tag `v2.4.31`、GitHub Release（Latest）三者一致，commit `80448f6`（npm tarball shasum `0f6329348f27f277cc4870b4d8d00e0a1ff30a70`，8 个文件）；仓库与 npm 产物里的 `lib/index.js` 同为 SHA256 `0515EF92B1C24675BB4809D49ED333E790EA9679EF0F67E82A8357602E0D671E`（已回下载逐字节比对）。issue #27 已回复并关闭（`stateReason=COMPLETED`，open issues = 0）。**桌面 profile 已就地升级到 2.4.31 并重启生效**（依赖号同步；未跑 pnpm；备份 `_hotfix-backup\profile-desktop-20261016192657\`）—— 已于 2026-10-16 重启后完成真机验证，实据见下 |
 | 仓库 | https://github.com/ZhangFengshun/dsh-remote-ssh（HTTPS，分支 main） |
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
 | 发布可见性 | package.json `publishConfig.access = "public"` |
 
+### 2.4.31 真机验证实据（2026-10-16 重启后，运行中宿主）
+
+方法：直接向运行中的宿主打 HTTP（`http://127.0.0.1:19387`），不采信插件自身的任何"已完成"输出；
+远端证据用**我自己的 ssh 客户端**（凭据只从 `<profile>` 工作区的 `.remote-ssh.json` 读，不外显）。
+
+1. **#27 修复**：`fs.tree {sessionId:"",path:""}` → **200**，`value.path` = 主目录、137 个条目（升级前同请求 → 400 `path 为必填项`）。
+2. **反向控制**（放行面没被放大）：`fs.read` 空 path → 400、`fs.write` 空 path → 400、`fs.tree` 相对路径且无会话 → 400 `无法解析相对路径`。
+3. **本地 `fs.readPage`**：159,934 字节文件 → 2 页（追踪 0→130783→159934），拼接后与原文件**逐字节相同**；`offset=size` → 空页 + `eof` + `nextOffset=size`；目录 → 400 `is a directory`；空 path → 400（未照搬 `fs.tree` 的空路径语义）；不存在 → 400 `cannot read`。
+4. **接管身份判定**：`sessionId` 为空时上游实现会先因 `sessionId` 缺失报错 —— 上述请求返回 200，即证明处理者是本插件的分支，而不是上游。
+5. **远端 `fs.readPage`（决定性证据）**：临时注册一个工作区指向远端 396,000 字节文件（**本地镜像里没有这个文件**）→ 4 页（0→130977→261954→392931→396000），拼接后 sha256 与远端原件一致（`a48c5a36…`），`size`/`mtimeMs` 来自远端 stat；**只在本地镜像存在的文件 → 400**（证明没有回落读镜像）。验证后临时工作区已用 `deleteWorkspace` 删除、远端临时目录已 rm、注册工作区数回到验证前的 2 个。
+6. **顺带验证孤儿镜像守卫（2.4.29）仍在生效**：手工把未注册目录放进镜像根，请求被明确拒绝（"位于远程工作区镜像目录下，但它不属于任何已注册的远程工作区…"），没有在镜像上执行任何操作。
+
+探针写法注记（踩过一次）：`/remote-ssh/api/*` 必须带 `x-requested-with` 头；其 HTTP 返回是 `{"ok":true,"value":{…}}` **信封**，
+直接读 `body.workspaces` 会得到 undefined 并误判成"0 个工作区"（`fs.*` 同样是 `value` 信封）。
 ### 端点接管清单（截至 2.4.31）
 
 - 本插件以 `kind: "exact"` 接管 **31** 条路由（`/sidebar/api/fs.*` + `/sidebar/file` + `git.*`）：2.4.28 接 better-sidebar 0.25.0 的 6 个，2.4.31 接 0.26.1 的 `fs.readPage`。
