@@ -1,0 +1,19 @@
+# 行尾纪律（背景见 MAINTENANCE「两个容易踩的坑」第 1 条）
+#
+# 本仓 core.autocrlf=true：git stash / checkout / show> 都可能把工作树里的文件写成 CRLF，
+# 而多个测试用**含 \n 的标记**去切片源码（如 lib/index.js 的 helper 块、客户端注入块）。
+# 换行一旦被改写，测试不是"断言失败"，而是**整个文件抛错**——同文件里后面的断言全部被掩盖，
+# 排查时极易误判成"实现变了"。这里把文本文件统一钉成 LF，从此不再依赖 core.autocrlf 的本地设置。
+#
+# 注意：仓库索引里一直是 LF（autocrlf 在提交时归一化），所以这条规则**不会**产生内容差异；
+# 它只是让工作树也稳定为 LF，避免上述踩坑。
+*.js    text eol=lf
+*.mjs   text eol=lf
+*.cjs   text eol=lf
+*.ts    text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+LICENSE text eol=lf
