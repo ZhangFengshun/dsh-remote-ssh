@@ -103,17 +103,23 @@ fs 处理器**不再用会话 cwd 决定"这次请求走不走远端"**，而是
 
 ```powershell
 cd C:\Users\Administrator\Desktop\temp\ChatGPTProProject\dsh-remote-ssh
-# 0. 改前先跑基线、改后再跑一次：npm test
-#    （= node tests/run-all.mjs，聚合运行器：28 个文件 / 1469 断言，约 7~13 秒；
-#     缺本机上游包时对拍断言自动跳过 → 1465，CI 里会把上游装上去所以是满额 1469）
-# 0b. 【待解锁后才生效】push 之后 GitHub Actions 会自己再跑一遍：workflows/tests.yml
-#     （windows-latest + Node 22 + 钉版上游 0.26.1）；另有 workflows/upstream-drift.yml 每周一
-#     03:00 UTC 用 @latest 跑 —— **它红了就是上游发了新端点**，按「升级 better-sidebar 后必做对拍」
-#     接管，别去改断言让它变绿。
-#     这两个 yml 目前**还没在仓库里**：当前 push 凭据是 OAuth App，没有 workflow scope，GitHub 会拒绝
-#     任何 .github/workflows/* 的新增/修改（refusing to allow an OAuth App to create or update workflow
-#     ... without `workflow` scope）。解锁一次：gh auth refresh -h github.com -s workflow，
-#     然后把工作流文件放回 .github/workflows/ 再 push。在此之前**发布前必须本地跑 npm test**。
+# 0. 改前先跑基线、改后再跑一次：npm test（= node tests/run-all.mjs 聚合运行器）
+#    本机基线：28 文件 / 1469 通过 / 0 失败，约 7~14 秒。判定口径要看清：
+#      FAIL / CRASH → 红；而**整文件跳过（0 断言）单列为 SKIP 并打印原因** —— 只看一个绿勾会被骗，
+#      例如 CI 上没有 WSL：unicode-names 整文件跳过（31 条）+ wrapper-terminal 少 5 条 → 1433。
+# 0b. push 之后 GitHub Actions 自动再跑一遍（已上线，2026-10-16 起为绿）：
+#    · workflows/tests.yml —— windows-latest + Node 22 + 钉版上游 0.26.1 + 运行时依赖 yaml/schemastery；
+#    · workflows/upstream-drift.yml —— 每周一 03:00 UTC 用 @latest 跑：**它红了就是上游发了新端点**，
+#      按「升级 better-sidebar 后必做对拍」接管，别改断言让它变绿。
+#    两个坑（都踩过，已写进工作流注释）：
+#      ⓐ 改 .github/workflows/* 不能用 origin —— 它是 OAuth App token，没有 workflow scope，
+#         GitHub 直接拒收（refusing to allow an OAuth App to create or update workflow ...）。
+#         改用 SSH 推：git push git@github.com:ZhangFengshun/dsh-remote-ssh.git main
+#         （或先 gh auth refresh -h github.com -s workflow 解锁 token）。
+#      ⓑ CI 上没有 DSH_PROFILE_DIR，而测试是按目录去找真实依赖的 → 缺 yaml / schemastery 时
+#         module-load 6 条红、settings-compat 直接抛「找不到依赖: yaml」，**看着像代码回归**。
+#         工作流里已显式装齐。本地要复现 CI 环境必须先 Remove-Item Env:DSH_PROFILE_DIR，
+#         否则会被本会话的 DSH_PROFILE_DIR 兜底，永远复现不出来。
 # 1. 改代码 + 升 package.json version + 更新 CHANGELOG.md（版本段 + 修复/性能数据）
 # 2. 提交 + 推送 + 发布（一条命令串行）：
 git add -A

@@ -6,6 +6,13 @@ name: tests
 #
 # 上游对拍用的是**钉住的**版本，保证同一份提交永远得到同一结果；
 # 上游有没有漂移由 upstream-drift.yml 每周单独盯（那份用 @latest）。
+#
+# 预期基线（2.4.31 时）：
+#   · 本机（有 WSL + GNU tar）：28 文件 / 1469 通过 / 0 失败
+#   · CI（windows-latest 没有 WSL）：1433 通过 / 0 失败，其中 unicode-names.test.mjs 整文件跳过、
+#     wrapper-terminal 的场景 10 部分跳过 —— 运行器会把这些跳过逐条打印出来。
+#   判定标准是「失败数为 0 **且** 跳过项都被解释」，不是只看一个绿勾：把整体跳过算成通过，
+#   就会出现"CI 全绿、实际少了 31 条断言"的自欺。
 on:
   push:
     branches: [main]
