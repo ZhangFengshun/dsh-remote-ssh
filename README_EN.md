@@ -46,7 +46,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.30
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.31
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -266,6 +266,7 @@ The plugin never patches DSH sources or injects into the profile dependency tree
 | A command hangs forever | The 120s timeout discards the pooled session automatically; use `timeoutMs: 0` for long jobs and `remote_ssh_kill` at any time |
 | Large files are truncated | 4MB per read, ≈6.29MB on the pooled download path (larger files fall back to a one-shot connection); use `remote_ssh_exec` with `head`/`tail` to page through |
 | **In a remote-workspace session a local absolute path cannot be read, and write/delete land on the remote; or a remote absolute path (`/mnt/...`, `/tmp/x.log`) never opens** | **Fixed in 2.4.30 (issue #26)**. The remote-vs-local decision used to look only at the **session cwd**: a remote-workspace session pushed the whole request into the remote branch. So ① a local absolute path was sent to the remote as `<remoteRoot>/Users/...` — reads reported `No such file`, and **if the remote happened to have that path, a different file was returned silently**, while `fs.write` never reached the local disk and `fs.remove`/`fs.rename` hit the remote; ② a remote absolute path was treated as relative and re-prefixed (`<root><root>/...`). Now every **request path** decides on its own: mirror member → mapped to the remote; drive letter / UNC (including `C:foo`) → **local**, even in a remote session; `/...` remote absolute → **passed through verbatim**; relative → resolved against the session cwd; mixing local with remote/mirror paths in one request → explicit `400`. The silent `localToRemote()` fallback was also raised from `debug` to `warn`. |
+| **"Add workspace" → the "📁 Local directory" tab immediately shows "path is required"; the tree is empty and no local workspace can be added** | **Fixed in 2.4.31 (issue #27)**: a side effect of the `localPathOf()` guard added in 2.4.27 for issue #25. The dialog is *designed* to send an empty path on first open (it means "open the home directory" — see the comment in `lib/client.js`; `localListDir()` has its own `homedir()` fallback), but the empty path was rejected outright. Now only "no session cwd + empty path + the read-only `fs.tree`" is allowed through; **writes, relative paths and every other method still fail exactly as before**. Workaround: type a full local absolute path in the field and press "Open" |
 
 ## How It Works
 

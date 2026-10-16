@@ -13,6 +13,16 @@
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
 | 发布可见性 | package.json `publishConfig.access = "public"` |
 
+### 端点接管清单（截至 2.4.31）
+
+- 本插件以 `kind: "exact"` 接管 **31** 条路由（`/sidebar/api/fs.*` + `/sidebar/file` + `git.*`）：2.4.28 接 better-sidebar 0.25.0 的 6 个，2.4.31 接 0.26.1 的 `fs.readPage`。
+- `fs.readPage`：5 MiB 以上文件的只读分页预览，**128 KiB/页、页尾回退到最后一个换行**、整页无换行时原样返回，返回 `{kind,text,offset,nextOffset,eof,size,mtimeMs,encoding}`（字段名取自上游，消费方是上游预览面板，不能自创）。远端分支一次 SSH 往返取 `size/mtime` + 该页字节（`tail -c +N | head -c 131072 | base64 -w0`），**回退与解码在本地做**；失败映射成上游同款 `400 fs-error`。`path` 必填。
+- 上游升级后先跑 `tests/sidebar-0250-endpoints.test.mjs`：它会列出「本插件未接管的上游端点」并对拍文件名校验等纯函数语义。上游重构（如 0.26.1 把单段名检查拆成 `assertSingleSegmentName`）会让上游沙箱抽取失败 —— 此时补抽对应函数即可，**不要**把对拍降级成「跳过」或放宽比较。
+
+### 两个容易踩的坑
+
+1. **行尾**：本仓 `core.autocrlf=true`，`git stash`/`git checkout`/`git show >` 都可能把 `lib/index.js` 变成 CRLF；而多个测试用含 `\n` 的标记切片源码，换行被改写会**整文件抛错**（不是断言失败，是异常，会掩盖同一文件里其它断言）。改完 `lib/` 下的文件后核一下「CRLF 行数应为 0」，或后续加 `.gitattributes`（`*.js text eol=lf`）一次性消除。注意 `README.md`/`README_EN.md` 本身就是 CRLF，改这两个文件要按它们自己的行尾写。
+2. **断言要能在坏状态下报红、而不是抛错**：`r.body.value.xxx` 这种直接解引用在失败路径上会抛 `TypeError`，把后面所有断言一起吞掉（只有变异控制才暴露得出来）。统一写 `!!r.body.value && r.body.value.xxx === …`。
 ### 路径归属规则（2.4.30 起，issue #26）
 
 fs 处理器**不再用会话 cwd 决定"这次请求走不走远端"**，而是逐条判每个请求路径（`payload.path` 与 `payload.paths[]`）的归属：

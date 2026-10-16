@@ -298,8 +298,11 @@ check(!/localToRemote\(localPath, remoteBase/.test(gate), 'C6 处理器里不再
 check((gate.match(/remotePathForRequest\(/g) || []).length >= 8, 'C7 8 个 fs 方法都走 remotePathForRequest（实际 ' + (gate.match(/remotePathForRequest\(/g) || []).length + ' 处）')
 check(/mirror-orphan/.test(gate) && /混用/.test(gate), 'C8 孤儿镜像路径与混用两条守卫都在')
 check(/\bwarn\(/.test(grab(src, 'function localToRemote')), 'C9 localToRemote 的兜底用的是 warn')
-check(pkg.version === '2.4.30', 'C10 package.json 版本 = ' + pkg.version)
-check(/## \[2\.4\.30\]/.test(changelog), 'C11 CHANGELOG 有 2.4.30 段')
+// C10–C12 不写死版本号：写死的话每次发版都要手改测试，忘改就是一条必红断言
+//（2.4.31 发版时实际踩到，一次红了 3 个文件）。改成「package.json 的版本必须在 CHANGELOG 里有对应段落」。
+const ver = pkg.version
+check(/^2\.4\.\d+$/.test(ver), 'C10 package.json 版本形如 2.4.x = ' + ver)
+check(changelog.includes('## [' + ver + ']'), 'C11 CHANGELOG 有 ' + ver + ' 段（发版即同步）')
 check(/issue #26/.test(changelog.slice(changelog.indexOf('## [2.4.30]'), changelog.indexOf('## [2.4.30]') + 4000)), 'C12 CHANGELOG 2.4.30 段引用了 issue #26')
 
 console.log('\n结果: ' + pass + ' 通过, ' + fail + ' 失败')

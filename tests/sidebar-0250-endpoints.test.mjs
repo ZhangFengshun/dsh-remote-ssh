@@ -558,6 +558,9 @@ if (!installed) {
       grabConst(installed.src, 'const ILLEGAL_FILE_NAME_CHARS =', ';'),
       grabFnText(installed.src, 'function firstIllegalNameChar('),
       grabConst(installed.src, 'const RESERVED_FILE_NAMES =', ']);'),
+      // 0.26.1 起 assertCreatableFileName 把"单段名"检查拆给了 assertSingleSegmentName，
+      // 不一起抽进沙箱的话它对**每个**输入都抛 ReferenceError（看起来像"上游全部拒绝"）。
+      grabFnText(installed.src, 'function assertSingleSegmentName('),
       grabFnText(installed.src, 'function assertCreatableFileName('),
       grabFnText(installed.src, 'function isoWithOffset('),
       grabFnText(installed.src, 'function parseBlamePorcelain('),

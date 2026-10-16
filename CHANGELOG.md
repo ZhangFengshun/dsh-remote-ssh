@@ -2,6 +2,35 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.31] — 2026-10-16
+
+### 修复：issue #27（「添加工作区 → 本地目录」弹窗打开即报「path 为必填项」，2.4.27 起的回归）
+
+- **现象**：侧栏「+ 添加工作区」→「📁 本地目录」tab 一打开就红字 `path 为必填项`，目录树为空、「选择此目录」不可用；「🌐 远程目录」tab 正常。
+- **根因**：客户端「本地目录」tab 首次打开时按设计发 `{sessionId:"", path:""}`（`lib/client.js`：「空路径时打开主目录」；`localListDir()` 自己也有 `if (!path) path = homedir()` 兜底）。2.4.27 为修 issue #25 引入的 `localPathOf()` 对空路径一律 400，把这条**只读的初始列举**一起拦了 —— #25 要防的是写操作与相对路径。
+- **修复**：只放行「无会话 cwd + 空路径 + `fs.tree` 这一个只读方法」→ 交给 `localListDir("")` 走 homedir 兜底。**有 cwd 时仍按 cwd 列举**；`fs.read`/`fs.write`/`fs.rename`/`fs.remove`/`fs.mkdir`/`fs.createFile` 的必填校验与相对路径解析一行未动。
+- **验证**：`tests/session-path.test.mjs` 86 → **93 条断言**，新增 B10b–B10g（2 条正向 + 1 条范围 + **3 条反向**：`fs.read`/写操作/相对路径仍 400）。**变异负向控制 3 个**（独立副本）：回退修复 → B10b+B10c 红；把放行扩大到 `fs.read` → B10e 红；无视会话 cwd → B10d 红。
+- **顺带修掉测试自身的健壮性缺陷**：新断言原先直接解引用 `r.body.value`，在坏状态下会**抛错**而不是报红（掩盖后续断言），已加守卫。另外重指了接线断言 C3 —— 原形状被新代码触发，改为「`payload.path || sessionCwd` 一律经 `localPathOf`，`fs.tree` 的空路径哨兵除外」，牙齿保留。
+
+### 接管：better-sidebar 0.26.1 新增端点 `fs.readPage`
+
+- 上游 0.26.1 为「5 MiB 以上文件的只读分页预览」新增了 `fs.readPage`（128 KiB/页、页尾回退到最后一个换行、整页无换行时原样返回，返回 `{kind,text,offset,nextOffset,eof,size,mtimeMs,encoding}`）。本插件未接管时，**远程工作区**下这一端点会落到上游实现上读**本地镜像**那份 —— 预览会显示陈旧副本（与 0.25.0 的 `fs.createFile` 同一类问题）。
+- 本地分支新增 `localReadPage()`（行为与上游逐字段对齐）；远端分支新增 `remoteReadPageForSidebar()`：一次 SSH 往返用 `stat` 帧拿 `size/mtime` + `tail -c +N | head -c 131072 | base64 -w0` 拿该页字节，**页尾回退与解码在本地做**，保证两端返回同一形状；失败映射成上游同款 `400 fs-error`。
+- `fs.readPage` 的 `path` **必填**（没有 `fs.tree` 那种「空路径=主目录」的语义），空路径仍 400。
+- **测试**：新增 `tests/fs-read-page.test.mjs`（**43 条断言**）：本地部分在真实文件系统上跑真实现（逐页读到 eof 后**与原文件逐字节相同**、页数与 `ceil(size/页大小)` 一致、末页外每页都以换行结束、单行超页不回退、`offset ≥ size` 收敛、目录/不存在/负 offset 的报错）；远端部分用真实现 + **伪造 SSH 出口**（命令里的 1-based 偏移与页大小、字节推进、mtime 秒→毫秒、ERR 帧/无帧/SSH 失败的透出）。
+- **变异负向控制 4 个**（独立副本）：页大小改 64 KiB → A9/A13/A14 红；`tail -c` 少 1 → B2 红；不做页尾回退 → A4/A7b 红；远端分支不走 `remotePathForRequest`（把镜像路径发给远端）→ C3 红。全部命中预期断言。
+
+### 测试基建：对拍 harness 适配上游 0.26.1
+
+- `tests/sidebar-0250-endpoints.test.mjs` 的上游沙箱补抽 `assertSingleSegmentName`：0.26.1 把「单段名」检查从 `assertCreatableFileName` 里拆了出去，不补的话它对**每个**输入都抛 `ReferenceError`，看起来像「上游把 `readme.md` 都拒绝了」（27 处假不一致）。补上后 D1/D2 恢复为 **105 条断言 0 失败**，语义逐项一致。
+
+### 套件
+
+- 全量 **28 个测试文件 / 1468 条断言 0 失败**（新增 `fs-read-page.test.mjs` 43 条、`session-path` +7 条、对拍 +1 条）。
+
+### 已知隐患（与本次功能无关，记录在案）
+
+- 本仓 `core.autocrlf=true`，`git stash`/`git checkout` 会把 `lib/index.js` 的**行尾换成 CRLF**；多个测试用含 `\n` 的标记切片源码，一旦换行被改写会**整文件抛错**（本次排查中实际踩到）。建议后续加 `.gitattributes`（`*.js text eol=lf`）一次性消除。
 ## [2.4.30] — 走不走远端由**请求路径本身**决定（issue #26：本机绝对路径被推到远端、远端绝对路径被再拼一次远端根）
 
 ### 修复

@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.30
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.31
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -270,6 +270,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |
 | **远程工作区会话里，本机绝对路径读不到、写/删落在远端；或者远端绝对路径（`/mnt/...`、`/tmp/x.log`）一律打不开** | **2.4.30 起已修复（issue #26）**。判定"这次请求走不走远端"此前只看**会话 cwd**：会话在远程工作区 → 整条请求都进远端分支。于是 ① 本机绝对路径被推到远端（`<远端根>/Users/...`），读报 `No such file`，**远端恰好有同路径文件时会静默返回另一份文件**，`fs.write` 本机不落盘、`fs.remove`/`fs.rename` 把删除/重命名打到远端；② 远端绝对路径被当成相对路径再拼一次远端根（`<root><root>/...`）。现在按**每条请求路径**的归属决定：镜像成员 → 远端映射；盘符/UNC（含 `C:foo`）→ **本地**，即使会话在远程工作区；`/...` 远端绝对路径 → **原样下发**；相对路径 → 按会话 cwd；同一次请求混用本机与远端/镜像路径 → 明确 `400`（不再猜一侧）。同一版把 `localToRemote()` 那句"镜像之外按相对路径处理"的兜底从 `debug` 提到 `warn`（真被触发说明又出现同类误判） |
+| **「添加工作区」→「📁 本地目录」tab 一打开就报「path 为必填项」，目录树空、无法添加本地工作区** | **2.4.31 起已修复（issue #27）**：这是 2.4.27 为修 issue #25 引入 `localPathOf()` 时误伤的 —— 弹窗首次打开会**按设计**发空路径（语义是「打开主目录」，`lib/client.js` 有注释、`localListDir()` 也有 `homedir()` 兜底），而空路径被一律判 400。现在只放行「无会话 cwd + 空路径 + `fs.tree` 这个只读方法」；**写操作、相对路径、其它方法一律照旧报错**。临时绕过：在路径栏手填完整本地绝对路径再点「打开」 |
 
 ## 原理
 

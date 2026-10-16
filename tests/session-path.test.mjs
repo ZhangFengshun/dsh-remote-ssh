@@ -211,6 +211,24 @@ try {
   r = await fsCall(api, sessionDir, 'fs.tree', { sessionId: 'sess-1', path: '.' })
   check(r.status === 200 && r.body.value.entries.some((e) => e.name === 'sub'), 'B10 fs.tree path="." → 会话 cwd 本身')
 
+  // ---- fs.tree 的空路径（issue #27：「添加工作区 → 本地目录」弹窗首次打开）----
+  // 客户端发 {sessionId:"", path:""}，语义是"打开主目录"（lib/client.js 注释 + localListDir 的
+  // homedir 兜底）。2.4.27 为修 #25 加的 localPathOf() 对空路径一律 400，把这条只读初始列举拦了。
+  r = await fsCall(api, sessionDir, 'fs.tree', { path: '' })
+  check(r.status === 200 && !!r.body.value && r.body.value.path === homedir(),
+    'B10b 无会话 + 空路径的 fs.tree → 200 且列出**主目录**（issue #27 回归点：2.4.27–2.4.30 此处 400「path 为必填项」）')
+  check(!!r.body.value && Array.isArray(r.body.value.entries), 'B10c 返回目录条目数组（只读初始列举不再被必填校验拦下）')
+  r = await fsCall(api, sessionDir, 'fs.tree', { sessionId: 'sess-1', path: '' })
+  check(r.status === 200 && !!r.body.value && r.body.value.path === sessionDir,
+    'B10d 有会话 cwd 时仍按**会话 cwd** 列举（放行空路径不会改去列主目录）')
+  r = await fsCall(api, sessionDir, 'fs.read', { path: '' })
+  check(r.status === 400 && String(r.body.error.message).includes('path 为必填项'),
+    'B10e 同一个空路径给 fs.read 仍然 400（issue #25 的必填校验不被放宽）')
+  r = await fsCall(api, sessionDir, 'fs.write', { path: '', content: 'X' })
+  check(r.status === 400, 'B10f 写操作的空路径仍然 400（放行范围只限只读列举）')
+  r = await fsCall(api, sessionDir, 'fs.tree', { path: 'tools' })
+  check(r.status === 400, 'B10g 无会话 + **相对路径**的 fs.tree 仍然 400（相对路径不放宽）')
+
   // ---- fs.trees ----
   r = await fsCall(api, sessionDir, 'fs.trees', { sessionId: 'sess-1', paths: ['tools', 'sub'] })
   check(r.status === 200 && r.body.value.levels.length === 2, 'B11 fs.trees 两条相对路径都处理')
@@ -351,7 +369,18 @@ console.log('\nC. 接线与文档')
   check((fsHandler.match(/localPathOf\(/g) || []).length >= 12, 'C1 fs 处理器里 12 个落点都过 localPathOf（远程 7 + 本地 7，含 fs.trees/fs.mkdir）')
   check(!/localReadText\(payload|localWriteFile\(payload|localRenameEntry\(payload|localRemoveEntry\(payload|localMakeDir\(payload|localListDir\(payload/.test(fsHandler),
     'C2 本地分支不再把 payload.path 直接交给 fs 函数')
-  check(!/payload\.path \|\| sessionCwd;(?!.*localPathOf)/.test(fsHandler), 'C3 远程分支不再用裸 payload.path')
+  // C3（issue #27 重指）：本地分支里 `payload.path || sessionCwd` 必须经 localPathOf 才能交给 fs 函数。
+  // 唯一例外是 fs.tree 的空路径哨兵 rawTreePath —— 它只承载"空"这一种取值（非空分支仍走 localPathOf），
+  // 空值最终交给 localListDir("")，由 localListDir 自己的 homedir 兜底处理。
+  const badAssign = []
+  for (const m of fsHandler.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*payload\.path \|\| sessionCwd;/g)) {
+    const name = m[1]
+    const tail = fsHandler.slice(m.index)
+    const usedByLocalPathOf = new RegExp('localPathOf\\(\\s*' + name).test(tail)
+    const isTreeSentinel = name === 'rawTreePath' && /if \(!rawTreePath\)/.test(tail)
+    if (!usedByLocalPathOf && !isTreeSentinel) badAssign.push(name)
+  }
+  check(badAssign.length === 0, 'C3 本地分支的 `payload.path || sessionCwd` 一律经 localPathOf（fs.tree 的空路径哨兵除外）')
   check(!fsHandler.includes('process.cwd()'), 'C4 fs 处理器里没有 process.cwd() 兜底')
   check(!fileHandler.includes('process.cwd()'), 'C5 /sidebar/file 里没有 process.cwd() 兜底')
   check(!gitHandler.includes('process.cwd()'), 'C6 git 处理器里没有 process.cwd() 兜底')
