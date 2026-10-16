@@ -12,6 +12,8 @@
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
 | 发布可见性 | package.json `publishConfig.access = "public"` |
+| GitHub Release | **v2.4.31 = Latest**。有 tag 的 **28 个版本全部有 Release**。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向发布提交 `3e65aa0`，已核对它与 npm 上 2.4.18 的产物 `lib/index.js` / `lib/client.js` **blob 完全相同**。npm 上另有 50 个更早的版本从未打过 tag —— **不打算批量补**（噪音大于价值），要补就按 §3 的 `# 0c.` 走 |
+| 文档（issue #21） | `~/.ssh/config` 的继承语义已按**代码**逐条写进两份 README 的故障排查表：导入 = 把 Host 块抄进连接配置；连接时以 profile 为准（总是 `-p <端口>` + `user@host`），只有 `keyPath` / `proxyJump` 留空才用 config 的值；导入侧只解析 `Host` 块（`Include` 递归）、含 `*`/`?` 的名字跳过、`Match` 块不解析 |
 
 ### 2.4.31 真机验证实据（2026-10-16 重启后，运行中宿主）
 
@@ -120,6 +122,17 @@ cd C:\Users\Administrator\Desktop\temp\ChatGPTProProject\dsh-remote-ssh
 #         module-load 6 条红、settings-compat 直接抛「找不到依赖: yaml」，**看着像代码回归**。
 #         工作流里已显式装齐。本地要复现 CI 环境必须先 Remove-Item Env:DSH_PROFILE_DIR，
 #         否则会被本会话的 DSH_PROFILE_DIR 兜底，永远复现不出来。
+# 0c. 历史 tag / Release 补档（2026-10-16 补 v2.4.18 时走通的路径）：
+#     ⓐ 先找**发布提交**：git log --all -S'## [<版本>]' -- CHANGELOG.md
+#        （2.4.18 → 3e65aa0。注意 -S 搜 package.json 的 "version": "<版本>" 这次**没搜到**，
+#         所以别只信一种找法 —— 提交信息 + CHANGELOG 段 + 时间线一起看）
+#     ⓑ **先核对再打 tag**：下载 npm 上那一版（registry 的 <版本> 级 URL 取 dist.tarball），
+#        用 git hash-object <解包后的 lib/index.js> 与 git rev-parse <提交>:lib/index.js 比 blob，
+#        相同才说明这个提交就是当初发出去的那份（package.json 的 version 也要一致）。
+#     ⓒ git tag -a <版本> <提交> && git push origin <tag>（tag 走 origin 即可，不碰工作流文件）
+#        gh release create <tag> --notes-file <正文> **--latest=false**
+#        ← 少这个参数会把 Latest 抢到旧版本上；建完必须独立核对：
+#          gh api repos/<owner>/<repo>/releases/latest --jq .tag_name  仍是新版本。
 # 1. 改代码 + 升 package.json version + 更新 CHANGELOG.md（版本段 + 修复/性能数据）
 # 2. 提交 + 推送 + 发布（一条命令串行）：
 git add -A
@@ -713,3 +726,15 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
      另外：`resources\runtime\bin\node.cmd` 的内容就是 `"%DSH_DESKTOP_NODE_EXECUTABLE%"` ——
      那个环境变量在子进程里缺席时它展开成一对空引号（`'""' is not recognized`），
      这是 issue #23 的现场实证，也说明"用自己的 `process.execPath`"是唯一不依赖宿主私有约定的来源。
+- **🕵️ 「本机绿」和「CI 绿」都可能是假象（2026-10-16，给本仓加 CI 的当天连踩两次）**：
+  第一次流水线红在「找不到依赖: yaml」而**不是**断言失败 —— 根因是这两个测试按目录去找真实依赖，
+  而**我这个会话的环境里有 `DSH_PROFILE_DIR` 兜底**，所以本机怎么"模拟 CI"都绿；把它清掉、
+  同时把 `USERPROFILE` 指向空目录，才复现出与 CI 日志逐条一致的红。第二次绿了但断言数是 **1433**
+  而不是本机的 1469 —— 差的 36 条全来自**需要 WSL 的场景**：`unicode-names` 整文件跳过（31 条）、
+  `wrapper-terminal` 的 WSL 场景少 5 条。三条可复用的教训：
+  （a）**"换个 HOME"不等于"换个环境"** —— 会话里的 `DSH_*` 变量会把真实机器状态悄悄带进模拟，
+  模拟 CI 时必须显式清掉；
+  （b）**聚合器不能把"跳过"算成"通过"** —— `tests/run-all.mjs` 现在把 0 断言的整文件跳过单列为
+  `SKIP` 并打印测试自己给的原因，局部跳过标注条数；判定标准写成"失败为 0 **且** 跳过项都被解释"，
+  而不是一个绿勾；
+  （c）**断言数要逐文件对拍，别只看总数** —— 总数一致也可能此消彼长，总数变小更要问清少在哪。
