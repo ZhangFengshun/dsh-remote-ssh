@@ -26,15 +26,18 @@ jobs:
         with:
           node-version: '22'
 
-      - name: 装上上游最新版
+      # 与 tests.yml 同理：运行时依赖（yaml / schemastery）也要装上，
+      # 否则 module-load 与 settings-compat 会因为"找不到依赖"而红，
+      # 那种红与"上游漂移"无关，会把真正的信号盖掉。
+      - name: 装上上游最新版 + 运行时依赖
         shell: pwsh
         run: |
           $ver = (npm view dsh-better-sidebar@latest version).Trim()
-          $dst = Join-Path $env:USERPROFILE '.dsh\profiles\desktop\node_modules'
-          New-Item -ItemType Directory -Force -Path $dst | Out-Null
-          npm pack "dsh-better-sidebar@$ver" --pack-destination $env:RUNNER_TEMP
-          tar -xzf (Join-Path $env:RUNNER_TEMP "dsh-better-sidebar-$ver.tgz") -C $env:RUNNER_TEMP
-          Move-Item (Join-Path $env:RUNNER_TEMP 'package') (Join-Path $dst 'dsh-better-sidebar')
+          $prof = Join-Path $env:USERPROFILE '.dsh\profiles\desktop'
+          New-Item -ItemType Directory -Force -Path $prof | Out-Null
+          Set-Content -Path (Join-Path $prof 'package.json') -Value '{"name":"ci-deps","private":true}' -Encoding utf8
+          npm i --prefix $prof --no-save --no-package-lock --no-audit --no-fund `
+            "dsh-better-sidebar@$ver" 'yaml@2.9.1' '@deepseek-ai/schemastery@3.18.4'
           Write-Host "::notice title=上游版本::$ver"
 
       - name: 全量测试（对拍上游最新版）
