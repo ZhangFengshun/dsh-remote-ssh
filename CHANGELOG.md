@@ -15,7 +15,7 @@
 
 ### 独立验证：真 sh + 真 git（16 条断言，含一个被逮住的真实 bug）
 
-`audit-2026-10-17/verify-perf-t3-remote-sh.mjs`：WSL 真 `sh` + 真 git 2.43，真实现 `gitStatusRemote` + 真解析器（只把 `runPooled` 换成 `wsl -e sh -c`）。干净仓库（段缺席 → 空 entries 且分支身份齐全）、脏仓库（真 numstat 行数经真 sh 分段逐条对上：暂存 +1/-0、未暂存 +3/-1、真改名 origin、未跟踪无行数）、只有未跟踪（tracked=0 → 段缺席）、PATH shim 让 status 全变体失败（`$T` 不存在 → `${N:-0}` 兜底不炸）、非 git 目录/不存在的目录 → `isRepo:false`。**第一版脚本把 N 计数放在 `cat; rm` 之后**，`$T` 已删导致短路退化成"总是短路"、脏仓库行数全丢 —— 单测（伪造 SSH 出口）查不出这种运行序问题，真 sh 验证立即红，修正后全绿。
+`scripts/verify-remote-status-script.mjs`：WSL 真 `sh` + 真 git 2.43，真实现 `gitStatusRemote` + 真解析器（只把 `runPooled` 换成 `wsl -e sh -c`）。干净仓库（段缺席 → 空 entries 且分支身份齐全）、脏仓库（真 numstat 行数经真 sh 分段逐条对上：暂存 +1/-0、未暂存 +3/-1、真改名 origin、未跟踪无行数）、只有未跟踪（tracked=0 → 段缺席）、PATH shim 让 status 全变体失败（`$T` 不存在 → `${N:-0}` 兜底不炸）、非 git 目录/不存在的目录 → `isRepo:false`。**第一版脚本把 N 计数放在 `cat; rm` 之后**，`$T` 已删导致短路退化成"总是短路"、脏仓库行数全丢 —— 单测（伪造 SSH 出口）查不出这种运行序问题，真 sh 验证立即红，修正后全绿。
 
 ## [2.4.32] — 2026-10-17
 

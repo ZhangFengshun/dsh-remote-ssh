@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 性能 t3 远端脚本的真 sh + 真 git 独立验证（2.4.33）。
+ * 远端 git.status 脚本的真 sh + 真 git 独立验证（随 2.4.33 引入，长期可复跑）。
  *
  * 为什么需要它：单测（sidebar-0280-git-status / perf-remote-open-2433）把 SSH 出口整个
  * 换成了伪造出口，脚本本身的 POSIX 正确性未被覆盖。本脚本在 WSL 的真 sh + 真 git 里
