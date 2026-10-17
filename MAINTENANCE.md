@@ -104,7 +104,7 @@ fs 处理器**不再用会话 cwd 决定"这次请求走不走远端"**，而是
 ## 3. 标准发布流程（历史会话沉淀，每条线都验证过）
 
 ```powershell
-cd C:\Users\Administrator\Desktop\temp\ChatGPTProProject\dsh-remote-ssh
+cd F:\MyAIProject\RemoteSSH\dsh-remote-ssh   # 2026-10-17 从桌面 temp\ChatGPTProProject 迁移到此
 # 0. 改前先跑基线、改后再跑一次：npm test（= node tests/run-all.mjs 聚合运行器）
 #    本机基线：28 文件 / 1469 通过 / 0 失败，约 7~14 秒。判定口径要看清：
 #      FAIL / CRASH → 红；而**整文件跳过（0 断言）单列为 SKIP 并打印原因** —— 只看一个绿勾会被骗，
@@ -227,9 +227,11 @@ dsh plugin --profile desktop add @zhangfengshun/dsh-remote-ssh@<版本>
 zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Library\bin
 ```
 
-- 本项目相关会话在 `--C-Users-Administrator-Desktop-temp-ChatGPTProProject--` 目录：
-  `session-d5dc5130`（主维护会话，2.1.7→2.3.9 全部发布史）、
+- 本项目相关会话的目录名由**当时的 cwd** 派生（`C:\...\ChatGPTProProject` → `--C-Users-Administrator-Desktop-temp-ChatGPTProProject--`）。
+  历史会话仍在该目录下：`session-d5dc5130`（主维护会话，2.1.7→2.3.9 全部发布史）、
   `session-996c0822`（AgentTeams 工程师子会话，含 awesome 投稿全过程）。
+  **2026-10-17 仓库迁移到 `F:\MyAIProject\RemoteSSH\dsh-remote-ssh`**，此后从新路径起的会话会落在
+  新的目录名（`--F-MyAIProject-RemoteSSH-dsh-remote-ssh--`）下；查老会话仍去老目录找。
 - 每条 JSONL 行是一个事件；`assistant/message` 里的 reasoning 字段含当时的决策过程。
 
 ## 5. 维护备忘
