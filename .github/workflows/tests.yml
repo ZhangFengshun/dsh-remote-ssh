@@ -45,7 +45,8 @@ jobs:
           $prof = Join-Path $env:USERPROFILE '.dsh\profiles\desktop'
           New-Item -ItemType Directory -Force -Path $prof | Out-Null
           Set-Content -Path (Join-Path $prof 'package.json') -Value '{"name":"ci-deps","private":true}' -Encoding utf8
-          npm i --prefix $prof --no-save --no-package-lock --no-audit --no-fund `
+          # --legacy-peer-deps：只装固定的三件，不跟随上游声明的 peer（理由见 upstream-drift.yml）
+          npm i --prefix $prof --no-save --no-package-lock --no-audit --no-fund --legacy-peer-deps `
             "dsh-better-sidebar@$ver" 'yaml@2.9.1' '@deepseek-ai/schemastery@3.18.4'
           $nm = Join-Path $prof 'node_modules'
           Write-Host ("对拍用上游版本 = " + (Get-Content (Join-Path $nm 'dsh-better-sidebar\package.json') -Raw | ConvertFrom-Json).version)

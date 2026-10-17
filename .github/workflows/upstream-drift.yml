@@ -29,6 +29,13 @@ jobs:
       # 与 tests.yml 同理：运行时依赖（yaml / schemastery）也要装上，
       # 否则 module-load 与 settings-compat 会因为"找不到依赖"而红，
       # 那种红与"上游漂移"无关，会把真正的信号盖掉。
+      #
+      # `--legacy-peer-deps` 是必需的：npm 7+ 会自动安装 peer。上游 0.28.0 声明
+      # `@deepseek-ai/dsh-settings@^0.2.1-rc.1`（peer），npm 会把它解析成 0.2.1-rc.2，
+      # 而后者要求 peer `@deepseek-ai/schemastery@~3.18.5`，与本处固定的 3.18.4 冲突 →
+      # ERESOLVE，整步失败（2026-10-17 实测）。真实 profile 里**根本没有** dsh-settings
+      # （只有 schemastery / yaml / better-sidebar，见 MAINTENANCE），所以只装固定的三件、
+      # 不跟着 peer 走才与真机同构；否则这条流水线会因为别的原因红，掩盖真正的漂移信号。
       - name: 装上上游最新版 + 运行时依赖
         shell: pwsh
         run: |
@@ -36,8 +43,11 @@ jobs:
           $prof = Join-Path $env:USERPROFILE '.dsh\profiles\desktop'
           New-Item -ItemType Directory -Force -Path $prof | Out-Null
           Set-Content -Path (Join-Path $prof 'package.json') -Value '{"name":"ci-deps","private":true}' -Encoding utf8
-          npm i --prefix $prof --no-save --no-package-lock --no-audit --no-fund `
+          npm i --prefix $prof --no-save --no-package-lock --no-audit --no-fund --legacy-peer-deps `
             "dsh-better-sidebar@$ver" 'yaml@2.9.1' '@deepseek-ai/schemastery@3.18.4'
+          $nm = Join-Path $prof 'node_modules'
+          Write-Host ("对拍基线：better-sidebar = " + (Get-Content (Join-Path $nm 'dsh-better-sidebar\package.json') -Raw | ConvertFrom-Json).version)
+          Write-Host ("运行时依赖 schemastery = " + (Get-Content (Join-Path $nm '@deepseek-ai\schemastery\package.json') -Raw | ConvertFrom-Json).version)
           Write-Host "::notice title=上游版本::$ver"
 
       - name: 全量测试（对拍上游最新版）
