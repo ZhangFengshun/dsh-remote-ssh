@@ -59,6 +59,10 @@ const GIT_READ_ENV = (() => {
   if (!m) throw new Error('lib/index.js 里找不到 GIT_READ_ENV')
   return m[1]
 })()
+// 性能 t3 的缓存常数按真实值提取（沙箱里传的必须和源码一致，避免自证）
+const GIT_STATUS_TTL_SRC = Number((/const GIT_STATUS_CACHE_TTL_MS = (\d+)/.exec(src) || [])[1])
+const GIT_STATUS_MAX_SRC = Number((/const GIT_STATUS_CACHE_MAX = (\d+)/.exec(src) || [])[1])
+if (!GIT_STATUS_TTL_SRC || !GIT_STATUS_MAX_SRC) throw new Error('lib/index.js 里找不到 git.status 缓存常数')
 
 const writeJson = (res, status, obj) => { res.status = status; res.body = obj }
 const writeOk = (res, value) => { res.status = 200; res.body = { ok: true, value: value } }
@@ -120,12 +124,20 @@ function statusSandbox(opts) {
     'join', 'readdir', 'ctx', 'requestTrust', 'denyRequest', 'writeJson', 'writeOk', 'readJsonBody',
     'runGitLocal', 'runPooled', 'GIT_READ_ENV',
     'matchRemoteWorkspace', 'readRemoteInfoSync', 'getProfile', 'localToRemote',
+    'gitStatusCache', 'GIT_STATUS_CACHE_TTL_MS', 'GIT_STATUS_CACHE_MAX',
     PATH_HELPERS + '\n' +
     grab(src, 'function shellQuote') + '\n' +
     grab(src, 'function shellQuotePath') + '\n' +
     grab(src, 'function sessionCwdFrom') + '\n' +
     grab(src, 'function parsePorcelainZ') + '\n' +
     grab(src, 'function gitContextOf') + '\n' +
+    // 性能 t3：status 走 5s TTL + epoch 缓存 —— 用真实源码切片（cacheEpoch 引用的
+    // 模块级 cacheEpochs 在沙箱里新建一份，互不串扰）
+    'const cacheEpochs = new Map();\n' +
+    grab(src, 'function profileKey') + '\n' +
+    grab(src, 'function cacheEpoch') + '\n' +
+    grab(src, 'function lruGet') + '\n' +
+    grab(src, 'function lruPut') + '\n' +
     STATUS_BLOCK + '\n' +
     grab(src, 'async function gitStatusImpl') + '\n' +
     grab(src, 'async function interceptGitHandler') + '\n' +
@@ -137,7 +149,8 @@ function statusSandbox(opts) {
     remote ? (p) => (typeof p === 'string' && p.indexOf(opts.sessionDir) === 0
       ? { profileId: 'p1', host: HOST, user: USER, keyPath: KEY, remotePath: REMOTE_ROOT, mirrorPath: opts.sessionDir } : null) : () => null,
     () => ({ id: 'p1', host: HOST, user: USER, keyPath: KEY }),
-    (local, mirror, remoteRoot) => String(remoteRoot) + String(local).replace(/\\/g, '/').slice(String(mirror).replace(/\\/g, '/').length)
+    (local, mirror, remoteRoot) => String(remoteRoot) + String(local).replace(/\\/g, '/').slice(String(mirror).replace(/\\/g, '/').length),
+    new Map(), GIT_STATUS_TTL_SRC, GIT_STATUS_MAX_SRC
   )
   return { handler: handler, rec: rec }
 }

@@ -2,6 +2,21 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.33] — 2026-10-17
+
+### 性能：远程打开目录/文件的耗时治理（实机测量驱动）
+
+运行中宿主 + 远程工作区（超算登录节点，高延迟公网链路，大仓库）的实测画像：热目录列举 **30ms**、热文件读取 **~150ms** 都很快；慢感来自三处 —— **远端 `git.status` 每次 1.6~3.7s**（大仓库 `status --untracked-files=all` + 两条全仓 numstat），而 0.28.0 客户端在文件操作后会 invalidate→立即重取同一仓库，把共享 SSH 会话队列堵死；**空闲 10min 关断会话**后下一次点击要重新付 ~1.7s 握手；高延迟链路上传输无压缩。本次四项修复（`tests/perf-remote-open-2433.test.mjs`，22 条断言 + 2 条变异负向控制）：
+
+- **`git.status` 响应缓存（5s TTL + epoch 感知，仅远端分支）**：同仓库重复请求 0 RTT；任何写/删/移/exec/git 变更都 `bumpCacheEpoch` → 立即失效，缓存只在「没有任何写动作」的窗口内生效（与 readCache/treeCache 同一纪律）。本地分支不缓存（本机 git 是进程内子进程，本来就不是瓶颈）。
+- **numstat 短路（远端脚本）**：status 没有任何 tracked 变更（干净仓库 / 只有未跟踪文件）时，两条全仓 `git diff --numstat` 输出必然为空却各扫一遍整个工作树 —— 直接跳过，与本地实现 `pathspec=[]` 短路同口径。⚠️ N 计数必须在 `cat; rm` 之前 —— 这个时序 bug 是真 sh 验证逮住的（见下）。
+- **`git.*` 专用池化会话**：`runPooled`/`getSession` 增加 role 参数，status/graph/通用 git runner 走 `profileKey|git` 独立会话 —— 大仓库的数秒级 git 命令不再让点击目录/文件排队等它，代价是每个 profile 多一条按需建立、同受 ServerAlive 保活的连接。
+- **非 tty SSH 连接开启内建压缩（`Compression=yes`）+ 空闲窗口 10→30min**：文件树/文件读取的 base64/文本载荷在高延迟公网链路上压缩收益显著；tty 交互终端保持默认。空闲窗口拉长减少「回来点两下就重付 1.7s 握手」，死连接由 ServerAlive 90s 探活 + 255 重建兜底。
+
+### 独立验证：真 sh + 真 git（16 条断言，含一个被逮住的真实 bug）
+
+`audit-2026-10-17/verify-perf-t3-remote-sh.mjs`：WSL 真 `sh` + 真 git 2.43，真实现 `gitStatusRemote` + 真解析器（只把 `runPooled` 换成 `wsl -e sh -c`）。干净仓库（段缺席 → 空 entries 且分支身份齐全）、脏仓库（真 numstat 行数经真 sh 分段逐条对上：暂存 +1/-0、未暂存 +3/-1、真改名 origin、未跟踪无行数）、只有未跟踪（tracked=0 → 段缺席）、PATH shim 让 status 全变体失败（`$T` 不存在 → `${N:-0}` 兜底不炸）、非 git 目录/不存在的目录 → `isRepo:false`。**第一版脚本把 N 计数放在 `cat; rm` 之后**，`$T` 已删导致短路退化成"总是短路"、脏仓库行数全丢 —— 单测（伪造 SSH 出口）查不出这种运行序问题，真 sh 验证立即红，修正后全绿。
+
 ## [2.4.32] — 2026-10-17
 
 ### 兼容：better-sidebar 0.28.0（新增 `git.graph` 提交图端点 + `git.status` 响应形状漂移）
