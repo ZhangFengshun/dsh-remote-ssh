@@ -7,13 +7,25 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本地版本 / npm latest / GitHub main | **2.4.31**（2026-10-16 发布，修复 issue #27 + 接管 better-sidebar 0.26.1 的 `fs.readPage`）：npm `dist-tags.latest`、tag `v2.4.31`、GitHub Release（Latest）三者一致，commit `80448f6`（npm tarball shasum `0f6329348f27f277cc4870b4d8d00e0a1ff30a70`，8 个文件）；仓库与 npm 产物里的 `lib/index.js` 同为 SHA256 `0515EF92B1C24675BB4809D49ED333E790EA9679EF0F67E82A8357602E0D671E`（已回下载逐字节比对）。issue #27 已回复并关闭（`stateReason=COMPLETED`，open issues = 0）。**桌面 profile 已就地升级到 2.4.31 并重启生效**（依赖号同步；未跑 pnpm；备份 `_hotfix-backup\profile-desktop-20261016192657\`）—— 已于 2026-10-16 重启后完成真机验证，实据见下 |
+| 本地版本 / npm latest / GitHub main | **2.4.33**（2026-10-17 发布，性能：远程打开目录/文件的耗时治理 —— git.status 5s TTL+epoch 缓存 / 远端 numstat 短路 / git 专用池化会话 / 非 tty SSH 压缩 + 空闲 30min）：npm `dist-tags.latest`、tag `v2.4.33`、GitHub Release（Latest）三者一致，commit `c39eeda`（npm tarball shasum `948e8b2d9bc09d88ab37676af29bccf01dc5b08a`，8 个文件）；仓库与 npm 产物里的 `lib/index.js` 同为 SHA256 `FB001841BB0E3B0F8D298C566678B77181C44A53CC2EB6FBC2A9D63C2AF830BD`（已回下载逐字节比对）。**桌面 profile 已就地升级到 2.4.33 并重启生效**（19:58:17 `apply()` 实据；依赖号同步；未跑 pnpm；备份 `_hotfix-backup\profile-desktop-2.4.32-20261017195439\`）—— 已于 2026-10-17 重启后完成真机验证，实据见下 |
 | 仓库 | https://github.com/ZhangFengshun/dsh-remote-ssh（HTTPS，分支 main） |
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
 | 发布可见性 | package.json `publishConfig.access = "public"` |
-| GitHub Release | **v2.4.31 = Latest**。有 tag 的 **28 个版本全部有 Release**。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向发布提交 `3e65aa0`，已核对它与 npm 上 2.4.18 的产物 `lib/index.js` / `lib/client.js` **blob 完全相同**。npm 上另有 50 个更早的版本从未打过 tag —— **不打算批量补**（噪音大于价值），要补就按 §3 的 `# 0c.` 走 |
+| GitHub Release | **v2.4.33 = Latest**。有 tag 的 **29 个版本全部有 Release**。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向发布提交 `3e65aa0`，已核对它与 npm 上 2.4.18 的产物 `lib/index.js` / `lib/client.js` **blob 完全相同**。npm 上另有 50 个更早的版本从未打过 tag —— **不打算批量补**（噪音大于价值），要补就按 §3 的 `# 0c.` 走 |
 | 文档（issue #21） | `~/.ssh/config` 的继承语义已按**代码**逐条写进两份 README 的故障排查表：导入 = 把 Host 块抄进连接配置；连接时以 profile 为准（总是 `-p <端口>` + `user@host`），只有 `keyPath` / `proxyJump` 留空才用 config 的值；导入侧只解析 `Host` 块（`Include` 递归）、含 `*`/`?` 的名字跳过、`Match` 块不解析 |
+
+### 2.4.33 真机验证实据（2026-10-17 重启后，运行中宿主）
+
+方法同上（直接打 `http://127.0.0.1:50311/sidebar/api/*`，`x-requested-with` 头 + 计时）。重启实据：`dsh-remote-shell.cmd` mtime **19:58:17**（2.4.33 的 `apply()`）。
+
+远程工作区 = 超算登录节点（高延迟公网链路）+ 大仓库（两个自带 `.git` 的 Julia 检出，zfs 网络盘）。对照基线是 2.4.32 同机同仓的测量：
+
+1. **git.status（主要痛点）**：同仓库立即重取 **20-23ms**（5s TTL 缓存命中，0 SSH 往返）—— 原来每次 1.6~3.7s；真仓库（`XCALibre-latest`）TTL 过期重算 **1.2~3.0s**（zfs 负载波动；脚本已不再做两次全仓 numstat 扫描）。仓库根非 git 仓库 → 正确返回 `isRepo:false`（其 1.8~3.3s 耗时是 git 在网络盘上向上走查 `.git` 的固有成本，非脚本开销）。
+2. **文件通道不再被 git 阻塞**：git.status 计算期间并发探测 `fs.trees`/`fs.read` 全部 1~30ms 返回（专用 `profileKey|git` 会话生效；2.4.32 时文件请求要排在慢 git 后面）。
+3. **fs.read**：热缓存 29ms；TTL 过期后真实传输（压缩通道）**126~286ms**（~10-50KB 文本，2.4.32 同文件 ~150-173ms）。
+4. **fs.trees**：冷列举（treeCache 未命中的深目录）108ms/层，热 1ms。
+5. **非仓库/不存在的目录 → `isRepo:false`**（2.4.32 已修，回归确认仍在）。
 
 ### 2.4.31 真机验证实据（2026-10-16 重启后，运行中宿主）
 
@@ -29,7 +41,7 @@
 
 探针写法注记（踩过一次）：`/remote-ssh/api/*` 必须带 `x-requested-with` 头；其 HTTP 返回是 `{"ok":true,"value":{…}}` **信封**，
 直接读 `body.workspaces` 会得到 undefined 并误判成"0 个工作区"（`fs.*` 同样是 `value` 信封）。
-### 端点接管清单（截至 2.4.31）
+### 端点接管清单（截至 2.4.33）
 
 - 本插件以 `kind: "exact"` 接管 **31** 条路由（`/sidebar/api/fs.*` + `/sidebar/file` + `git.*`）：2.4.28 接 better-sidebar 0.25.0 的 6 个，2.4.31 接 0.26.1 的 `fs.readPage`。
 - `fs.readPage`：5 MiB 以上文件的只读分页预览，**128 KiB/页、页尾回退到最后一个换行**、整页无换行时原样返回，返回 `{kind,text,offset,nextOffset,eof,size,mtimeMs,encoding}`（字段名取自上游，消费方是上游预览面板，不能自创）。远端分支一次 SSH 往返取 `size/mtime` + 该页字节（`tail -c +N | head -c 131072 | base64 -w0`），**回退与解码在本地做**；失败映射成上游同款 `400 fs-error`。`path` 必填。
