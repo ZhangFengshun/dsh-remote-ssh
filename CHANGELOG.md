@@ -2,6 +2,57 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.32] — 2026-10-17
+
+### 兼容：better-sidebar 0.28.0（新增 `git.graph` 提交图端点 + `git.status` 响应形状漂移）
+
+上游 0.28.0 的 HTTP 派发表从 42 个方法增加到 43 个，**唯一新增的是 `git.graph`**（0.28.0 新增「Git Graph」提交图面板的取数端点）；另有一处**已接管端点**的响应形状漂移（`git.status`）。这两件事都不会报错，只会静默给出旧/空的仓库视图 —— 与 2.4.18 / 2.4.28 修的是同一类问题：**没被拦截的端点会落在本地镜像上**。
+
+- **新增接管 `git.graph`**（`GIT_METHODS` 18 → 19 项）。
+  - 入参 `{branch?, count?, cursor?}`：`branch` 必须是 `refs/heads/…` / `refs/remotes/…` 全名；`count` 安全整数且 ≥1（内部上限 200）；`cursor` 是 `base64url(JSON{version:1,fingerprint,offset})`。返回 `{isRepo, root?, entries[{hash,hashFull,parents,author,date,subject,message,refs}], branches[{ref,name,hashFull}], hasMore, nextCursor?, snapshot}`。
+  - 分页游标锚在 **sha256 快照指纹**上（`for-each-ref` + `HEAD` + `symbolic-ref`，日志前后各取一次）：分页期间历史变了 → `graph-stale`（**HTTP 409**）；分支 >1000 或翻页越过 10000 → `graph-limit`（**400**）。这些 HTTP 码与上游逐条一致（此前本插件把业务错误一律映射 500）。
+  - **远端分支**把 `root` 回映射成本地镜像路径：客户端把它当 `repoRoot` 用（`client.js` 里与树根标签比较），返回远端绝对路径会让它落到另一个分支上。远端仓库根在会话目录之下 → 映射成镜像内的对应子目录；在会话目录之上（工作区是仓库子目录）→ 退化成镜像根，保证跨页稳定。
+  - **测试**：新增 `tests/sidebar-0280-git-graph.test.mjs`（**79 条断言**）：本地分支逐条比对实参与返回形状（含 `%x00` 日志解析、装饰、`count` 上限、游标往返、指纹过期、未知分支、>1000 分支、非仓库、空仓库、`offset+limit>10000`）；远端分支验证**只发远端、一次分页恰好 2 次 SSH 往返**、命令带只读环境、`root` 三种映射；最后用一个**真实临时 git 仓库**做端到端（真 `git log` 解析、真分页闭环、真过期检测、真空仓库、真非仓库目录）。
+
+- **`git.status` 对齐 0.28.0 的响应形状**（本插件**已经接管**这个端点，所以此前是静默降级：既不报错也不提示）。
+  - 取数从 `--porcelain=v1 -z` 换成上游同款 `status --porcelain=v2 --branch --ahead-behind -z --untracked-files=all`，并补齐 0.28.0 新增字段：`upstream` / `ahead` / `behind` / `detached` / `operation`（`merge` / `rebase`，按 `.git` 目录状态判定），以及条目级 `staged` / `unstaged` 行数（两条 `diff --numstat`；上游口径是**绝不合并**，因为合并会重复计行）、`truncated`（>2000 条截断）。
+  - **有意差异（健壮性）**：`--ahead-behind` 需要 git ≥ 2.41，远程主机（尤其超算登录节点）可能更旧。本插件依次降级 **v2+ahead-behind → v2 → v1**，v1 路径明确缺新字段而不是给错值，面板不会因 git 版本整体失败。
+  - **远端实现改成一次 SSH 往返**（`status` + `operation` + 两侧 `numstat` 同一条脚本，`@@DSH_GS@@` 分段；含 NUL 的 status 输出先落远端临时文件再 `cat`，**不经 shell 变量**——命令替换会吃掉 NUL）。旧实现是 3 次往返且永远拿不到新字段。远端 `numstat` 不带 pathspec（整仓），结果与本地同构、只是多算一点。
+  - **远端目录不在（工作区被删/改名）→ `isRepo:false`，不再 500**：原来的 `cd <dir> || exit 3` 会让脚本以非 0 退出、被映射成 `git-error` 500（git 面板弹红字）。现在脚本自己打印 `NOTREPO` / `NOREPO`，与"目录存在但不是仓库"同一口径；真正的 SSH 失败仍照旧 500（不会被这条兜底吞掉）。
+  - **测试**：新增 `tests/sidebar-0280-git-status.test.mjs`（**95 条断言**）：纯解析器（v2 records/meta、改名 origin、二进制 `-\t-`、行框改名记法折叠、pathspec 的未跟踪排除与 >8000 字节兜底、截断）；本地分支（新字段、`operation` 三态、**三条降级链**、只有未跟踪时跳过 numstat）；远端分支（一次往返、脚本不捕获 NUL、NOTREPO/v1/none/SSH 失败四种结局、cd 失败必须给 NOTREPO 而不是 `exit 3`）；真实仓库端到端（真 `ahead/behind=1/0`、真改名 `origin` 与非零行数、真二进制 `{binary:true}`、真 detached、真 merge-in-progress）。
+
+### 独立验证：真 sh + 真 git（不是只有伪造 SSH 出口的单测）
+
+单测把 SSH 出口整个替换掉了，**脚本本身的 POSIX 正确性**（引用、标记、NUL 传输、shell 侧 `elif` 降级链）未被覆盖。本次另外在 **WSL 的真 `sh` + 真 git 2.43** 上，用真实现 + 真解析器 + 真 handler 跑了一遍（`runPooled` 换成 `wsl -e sh -c <script>`，其余一字不改），**32 条断言 0 失败**：
+
+- 真远端 `git.status`：3 条真实状态、`a.txt` 的 `MM` 与两侧各 +1/-0、真改名 `origin=keep.txt`（证明 NUL 经 `cat` 无损）、未跟踪无行数、临时文件用完即删；
+- 真远端 `git.graph`：真提交图（hash/装饰/主题）、真游标分页闭环（第二页拿到更老的提交）、`root` 回映射成镜像路径、真 sha256 指纹；
+- **shell 侧降级链用 PATH shim 真验**：让 `--ahead-behind` 报错 → 脚本落到 `v2nb`；让 `porcelain=v2` 报错 → 落到 `v1` 且分支来自独立 `BRANCH` 段；
+- 真非仓库目录与**真不存在的目录** → 两者都是 `isRepo:false`（不是 500）。
+
+### 兼容：DSH 宿主 0.2.1-rc.1（信任源迁移 + peer 范围不再依赖宿主选项）
+
+对宿主 0.2.1-rc.1（asar 182.7 MB，`dsh/package.json` 全线 0.2.1-rc.1，cordis 4.0.5，node 24.21.0 / Electron 44.7.0）做了逐 API 审计，两处需要动代码：
+
+- **信任源迁移**：`ctx.webRuntime.trustedHosts` 在 0.2.1-rc.1 里**已不存在**（asar 全树 5,492 个文件 0 命中；同名 `WebRuntime` 类是联网搜索服务 `ctx.web`，无关）。新家是 **`ctx.webStartup.trustedHosts`**（`dsh-web-app/lib/startup.js` 的 `ctx.provide("webStartup", …)`，宿主注释写明是 "ordinary Cordis service"，无 `isolate`，宿主自己的 `webserver` / `connection` 行也是 `inject: [webStartup]`）。
+  - 2.4.32 起**两个服务都软注入**：新宿主读 `webStartup`，老宿主（0.1.x）退回 `webRuntime`，两者都没有则保持 loopback-only；`trustedHostsNow()` 仍是**按请求实时读取**，服务值可被替换，无需重启插件。软注入保证任何一个服务改名/移除都不会阻塞插件挂载。
+  - 这是**非回归**的既有退化：桌面端 `networkExposure: loopback`，loopback 永远通过本插件自己的围栏，本次升级前后功能都正常；受影响的是"绑定局域网 IP 但没配 `--trusted-host`"的用法（此前插件会 403，现在 `--trusted-host` 这条官方路径真正生效）。
+  - **有意保留的一处更严**：宿主 0.2.1-rc.1 的 `/api` 围栏新增了"Host 等于监听绑定 IP 字面量"例外（`webStartup.host`），本插件**不跟随** —— 本插件自注册的 `webServer` 路由在宿主浏览器令牌认证栅栏之外，跟随就等于把远端的文件读写与终端能力开放给同网段。要远程访问请显式 `--trusted-host`。
+- **peer 范围不再依赖宿主的 `includePrerelease`**：宿主兼容性门（`dsh-app-boot` 的 `unmetRequirements`）调用 `semver.satisfies(v, range, { includePrerelease: true })`。实测（本机 semver 7.8.5）：`satisfies("0.2.1-rc.1", "^0.2.0-rc.1")` **不带**该选项为 `false`、带上才 `true` —— 也就是"插件在 0.2.1-rc.1 上不被拒"完全依赖宿主的实现细节。三个 DSH peer 现在都显式补上 `|| ^0.2.1-rc.1`，两种判定都通过；`0.3.0-rc.1` 仍被拒（不越界声明未验证的线）。
+- **其余逐 API 判定为兼容**（静态证据 + 运行中宿主只读实测）：`ctx.webServer.register`（exact/prefix 形状与重复路由 throw）、`ctx.subprocess`（实测 `testConnection` 200）、`ctx.settings`（`describe/update/configure/volatile` 齐全；旧的 `register` 回退已是死代码）、客户端 `slots`/`locale`、`defineTool` + output schema（13 个工具全部注册通过）、cordis `inject`/fiber、`workspaceRegistry`/`fileReferences`/`profileContext` 等服务键全部未变。
+- **日志侧**：本次升级期间宿主有两次启动失败 crash（15:22/15:23），等待表里 `better-sidebar` 在等已消失的 `webRuntime`（0.26.1 的硬依赖）、`remote-ssh` 在等 `tools`（上游连带）；换 better-sidebar 0.28.0 并重启（15:53）后**再无 crash**，`.plugin-manager` 日志今天 0 新增，**本插件零 warn / 零 error**。
+- **测试**：`tests/trust-fence.test.mjs` 61 → **68 条**（新增 B2：新源优先、旧源兜底、双缺 → 空列表、新源形状不对 → 退回旧源不抛错）；`tests/manifest-compat.test.mjs` 43 → **49 条**（已验证线加 `0.2.1-rc.1`、`TARGET` 与 `CORDIS_VERSION` 对齐实测值，并显式锁住"严格判定下 `^0.2.0-rc.1` 覆盖不到 `0.2.1-rc.1`"这条脆弱点）。
+
+### 套件
+
+- 全量 **30 个测试文件 / 1657 条断言 0 失败**（新增两个文件共 175 条断言 + 信任源/清单 13 条）。
+- 上游漂移巡检（`.github/workflows/upstream-drift.yml`，每周一 03:00 装 upstream latest 跑对拍）此前会红：`tests/sidebar-0250-endpoints.test.mjs` 的 C9 会报 `缺: git.graph`。本次修复后该对拍恢复为 **105 条断言 0 失败**。
+
+### 已知项（本次未改，记录在案）
+
+- `git.status` 仍未返回上游的 `root` / `repositories`（多仓库容器发现）：这是 0.26.1 起就存在的差距，与 0.28.0 的形状漂移无关；本插件的仓库定位始终以会话工作目录为准。
+- 上游 0.28.0 把信任判定从 `webRuntime.trustedHosts` 迁到了 `connection` 服务（删除了 `trust-fence.ts`）。本插件仍走软注入的 `webRuntime`，宿主当前两者都提供；若未来 DSH 移除 `webRuntime`，会按设计静默回落到 loopback-only（不崩、不放宽）。
+
 ## [2.4.31] — 2026-10-16
 
 ### 修复：issue #27（「添加工作区 → 本地目录」弹窗打开即报「path 为必填项」，2.4.27 起的回归）

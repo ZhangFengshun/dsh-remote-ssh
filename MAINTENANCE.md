@@ -468,8 +468,14 @@ zstd -d -f <file>.zstd -o out.jsonl   # zstd 位于 E:\ProgramData\anaconda3\Lib
   schema）、`Tool.listTools`（插件是否真的注册了工具）、client `Slots.listSubTree`（客户端槽位是否存在）。
   0.2.0-rc.1 里 Config 目录用 `include:<patchId>` 命名，但 **patch 仍按 `patchId` 命中**（我们的
   `terminal-controller` patch 因此照旧生效）；`settings.describe()` 的 `ns` 也仍是 `remote-ssh` 这类 patchId。
-  `webRuntime`（信任围栏的信任源）在 0.2.0-rc.1 已被移除 → 软注入下自动退回 loopback-only（桌面端本身
-  `networkExposure: loopback`，功能无损失）。
+  `webRuntime`（信任围栏的信任源）在 0.2.0-rc.1 已被移除 → 2.4.32 起改读 **`ctx.webStartup.trustedHosts`**
+  （宿主 `dsh-web-app/lib/startup.js` 里 `ctx.provide("webStartup", …)`，"ordinary Cordis service"、无
+  `isolate`，插件 entry 可注入；宿主自己的 `connection`/`webserver` 行也是 `inject: [webStartup]`）。
+  两个服务都**软注入**：新宿主走 `webStartup`、老宿主走 `webRuntime`、都没有则退回 loopback-only
+  （桌面端本身 `networkExposure: loopback`，功能无损失）。**注意**：宿主 0.2.1-rc.1 起 `/api` 围栏还多认
+  "监听绑定 IP 字面量"（`webStartup.host`）这一例外，而本插件只认 loopback + trustedHosts ——
+  这是**有意更严**（本插件的路由在宿主浏览器令牌认证栅栏之外，放宽会把远端的文件/终端能力暴露给同网段），
+  需要远程访问时用 `--trusted-host` 显式授权。
 - **🧩 DSH 0.1.7-rc.2 起的 settings 模型（2026-09-28 适配，issue #16）**：`settings` 服务
   **没有** `register(ns, schema)`，改为 `configure / describe / update / replace / mutate`；
   用户偏好存放在**本插件 loader 行的 Config**（命名空间 = **entry id / patchId**，我们 bundle 里是

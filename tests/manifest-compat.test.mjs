@@ -17,11 +17,18 @@ const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 
 /** 我们已实测过的运行时版本线（新增验证后往这里加；每条都必须被每个 peer 范围覆盖）。 */
-const VERIFIED_LINES = ['0.1.0-rc.6', '0.1.5-rc.1', '0.1.7-rc.2', '0.2.0-rc.1']
-/** 当前官方最新线（harness 实际跑的目标）。 */
-const TARGET = process.env.DSH_RUNTIME_VERSION || '0.2.0-rc.1'
+const VERIFIED_LINES = ['0.1.0-rc.6', '0.1.5-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.1-rc.1']
+/**
+ * 当前官方最新线（harness 实际跑的目标）。
+ *
+ * 注：本文件的比较器是**严格** npm semver（预发布需"元组相同且比较器自带预发布"），等价于宿主
+ * `semver.satisfies(v, range)` **不带** `includePrerelease` 的判定，也正是最坏情况。0.2.1-rc.1 这条线
+ * 显式列进每个 peer 后，两种判定都通过；只写到 `^0.2.0-rc.1` 时，则只有宿主加 `includePrerelease: true`
+ * 才通过（dsh-app-boot 目前确实加了，但那是宿主实现细节，不该由它兜底）。
+ */
+const TARGET = process.env.DSH_RUNTIME_VERSION || '0.2.1-rc.1'
 /** 运行时实际带的 cordis 版本（cordis 是普通库，版本号不属于 DSH 线）。 */
-const CORDIS_VERSION = process.env.DSH_CORDIS_VERSION || '4.0.4'
+const CORDIS_VERSION = process.env.DSH_CORDIS_VERSION || '4.0.5'
 
 // ---- 小型 semver（覆盖本项目用到的写法：^x.y.z、可带 -pre、`||` 列表），严格语义 ----
 function parseVersion(text) {
@@ -99,6 +106,11 @@ console.log('A · 比较器自检（先证明围栏本身与 harness 判定一�
   check(satisfiesRange('0.1.7-rc.2', '^0.1.7-rc.2') === true, '^0.1.7-rc.2 覆盖 0.1.7-rc.2')
   check(satisfiesRange('0.2.0-rc.1', '^0.1.0-rc.6') === false, '⚠ 回归点：^0.1.0-rc.6 **不**覆盖 0.2.0-rc.1（2.4.15 被拒的原因）')
   check(satisfiesRange('0.2.0-rc.1', '^0.2.0-rc.1') === true, '^0.2.0-rc.1 覆盖 0.2.0-rc.1')
+  // 0.2.1-rc.1（2026-10-17 实测 harness 版本）：只写到 ^0.2.0-rc.1 时，本严格判定为 false ——
+  // 也就是说旧范围能通过完全依赖宿主传 includePrerelease: true。显式加线后两种判定都成立。
+  check(satisfiesRange('0.2.1-rc.1', '^0.2.0-rc.1') === false, '⚠ 脆弱点：严格判定下 ^0.2.0-rc.1 **不**覆盖 0.2.1-rc.1（需宿主加 includePrerelease）')
+  check(satisfiesRange('0.2.1-rc.1', '^0.2.0-rc.1 || ^0.2.1-rc.1') === true, '显式加 ^0.2.1-rc.1 后严格判定也覆盖 0.2.1-rc.1（消除对宿主选项的依赖）')
+  check(satisfiesRange('0.4.0', '^0.2.1-rc.1') === false, '^0.2.1-rc.1 不越界覆盖 0.4.x')
   check(satisfiesRange('0.3.0-rc.1', '^0.2.0-rc.1') === false, '^0.2.0-rc.1 不越界覆盖 0.3 线')
   check(satisfiesRange('0.1.0-rc.6', '^0.1.0-rc.6 || ^0.1.5-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1') === true, 'OR 列表覆盖首条线')
   check(satisfiesRange('0.1.5-rc.3', '^0.1.0-rc.6 || ^0.1.5-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1') === true, 'OR 列表覆盖 0.1.5 线的补丁预发布')

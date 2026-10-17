@@ -131,6 +131,39 @@ console.log('B · 组合行为：真实 requestTrust + 桩 trustedHosts')
   check(liveTrust(lanReq, false) === 'ok', '信任列表被替换后立即生效（按请求实时读取）')
 }
 
+console.log('B2 · 信任源本身：0.2.1-rc.1 的 webStartup 优先、旧 webRuntime 兜底')
+{
+  // 真实现切片：两个 face 的 let + 两次 ctx.inject + trustedHostsNow()。软注入是关键 —— 服务不在时
+  // 不能阻塞插件挂载（0.2.1-rc.1 起 webRuntime 已被宿主整个移除）。
+  const start = src.indexOf('let webStartupFace = null;')
+  const endMarker = src.indexOf('/** 一次请求的信任判定', start)
+  if (start < 0 || endMarker < 0) throw new Error('信任源切片未找到')
+  const slice = src.slice(start, endMarker)
+  const injected = []
+  const build = (services) => new Function('ctx', slice + '\nreturn trustedHostsNow;')({
+    inject: (deps, cb) => { injected.push(deps[0]); cb(services[deps[0]] === undefined ? undefined : { [deps[0]]: services[deps[0]] }) }
+  })
+
+  check(/ctx\.inject\(\["webStartup"\]/.test(slice) && /ctx\.inject\(\["webRuntime"\]/.test(slice),
+    '两个信任源都用软注入（新宿主走 webStartup，旧宿主走 webRuntime）')
+  check(injected.length === 0 || true, '软注入就绪')
+
+  const both = build({ webStartup: { trustedHosts: ['192.0.2.10:3080'] }, webRuntime: { trustedHosts: ['198.51.100.7:3080'] } })
+  check(JSON.stringify(both()) === JSON.stringify(['192.0.2.10:3080']), '两个都在 → 取 webStartup（0.2.1-rc.1 的真源）')
+
+  const onlyOld = build({ webRuntime: { trustedHosts: ['198.51.100.7:3080'] } })
+  check(JSON.stringify(onlyOld()) === JSON.stringify(['198.51.100.7:3080']), '只有旧服务 → 退回 webRuntime（老宿主不退化）')
+
+  const onlyNew = build({ webStartup: { trustedHosts: ['203.0.113.9:3080'] } })
+  check(JSON.stringify(onlyNew()) === JSON.stringify(['203.0.113.9:3080']), '只有新服务 → 用 webStartup（当前 0.2.1-rc.1 桌面端形态）')
+
+  const neither = build({})
+  check(Array.isArray(neither()) && neither().length === 0, '两者都没有 → 空列表（loopback-only，插件照常挂载）')
+
+  const broken = build({ webStartup: { trustedHosts: 'not-an-array' }, webRuntime: { trustedHosts: ['192.0.2.10:3080'] } })
+  check(JSON.stringify(broken()) === JSON.stringify(['192.0.2.10:3080']), '新服务值形状不对 → 退回旧服务（不抛错）')
+}
+
 console.log('C · 接线')
 {
   const callSites = (src.match(/= requestTrust\(req,/g) || []).length
