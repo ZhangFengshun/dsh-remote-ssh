@@ -63,9 +63,11 @@ const api = new Function(
   grab('function ownEntryId') + '\n' + grab('function parseLegacyPrefsSection') + '\n' +
   grab('async function readLegacyPrefs') + '\n' + grab('function resolvePrefValue') + '\n' + grab('function prefsArray') + '\n' +
   grab('function prefsScalar') + '\n' +
+  // issue #28：read() 里还要归一化全局默认同步范围，这两个 helper 必须一起进沙箱
+  grab('function prefsNumber') + '\n' + grab('function normalizeSyncList') + '\n' + grab('function parseSyncMaxBytes') + '\n' +
   grab('function describePrefsShape') + '\n' +
   grab('function createNewSettingsFace') + '\n' + grab('async function migrateLegacyPrefs') +
-  '\nreturn { ownEntryId, parseLegacyPrefsSection, readLegacyPrefs, resolvePrefValue, prefsArray, prefsScalar, createNewSettingsFace, migrateLegacyPrefs };'
+  '\nreturn { ownEntryId, parseLegacyPrefsSection, readLegacyPrefs, resolvePrefValue, prefsArray, prefsScalar, prefsNumber, normalizeSyncList, parseSyncMaxBytes, createNewSettingsFace, migrateLegacyPrefs };'
 )(
   parseYaml,
   (await import('node:path')).join,

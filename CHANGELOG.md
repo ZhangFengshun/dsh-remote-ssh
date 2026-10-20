@@ -2,6 +2,38 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.34] — 2026-10-20
+
+### 同步范围终于有了 GUI 入口（issue #28，举报人 yanghuan）
+
+`syncPaths` / `syncExclude` / `syncMaxBytes` 是 #20 就落地的**后端**能力：schema 有字段、`updateWorkspace` 能写、`syncOptsFrom` 有「逐次参数 → 工作区字段 → 全局默认」三级回退。但**客户端一个入口都没有** —— 设置面板只管 `writeBack` / `writeBackExclude`，「添加工作区」固定只传 `profileId + remotePath`，于是新工作区永远是 `syncPaths: []`。后果不是"少个功能"，而是把安全阀变成陷阱：`remotePath: ~` 的工作区空范围 = 整树 tar，2 GiB 体积哨兵当场拒绝；用户只能每次直调 `POST /remote-ssh/api/updateWorkspace`、或手改 `cordis.patch.yml`（举报人两条都试过，都是应急）。本次四项：
+
+- **工作区卡片：同步范围 / 同步排除 / 体积上限**三个输入框（体积界面按 GiB 填，宿主存字节）。保存仍是**一次** `updateWorkspaceGuards` 原子写 —— 写回护栏与同步范围一起落库，不会只改一半。语义：`undefined` = 不动、`[]` / `0` = 显式清空（回到整树 / 内置 2 GiB）。
+- **「添加工作区」弹窗：可选同步范围**。只传非空值；留空交给「全局默认」，再留空才是整树 —— 建区即定范围，不必建完再补一遍。
+- **全局默认（进阶设置）**：`defaultSyncPaths` / `defaultSyncExclude` / `defaultSyncMaxBytes` 进 `PrefsSchema`，`savePrefs` 白名单扩展、`getPrefs` 回读；三个 settings face（新版 `describe` / 旧版 `register` / 只读 `config` 兜底）的 `read()` **都**回这三个默认值 —— 少一处就会在旧版 DSH 上显示成空。
+- **手动「⬇ 同步 / ⬆ 推送」按钮**：复用已有 `syncDown` / `syncUp` 端点（走该工作区的持久化范围），把 client 里闲置已久的 `sync.*` 文案接上。同步/推送是显式点击，不必"叫模型跑一下"。**不新增任何路由**（接管清单仍是 31 条）。
+
+### 归一化：一处拆分、一处解析，不让脏值进 tar 命令行
+
+新增两个纯函数并在宿主所有入口统一使用：
+
+- `normalizeSyncList`：数组或「逗号 / 换行 / 分号分隔」整串 → `trim` + 去空 + 去重。**空串必须丢** —— `tar --exclude=""` 会命中一切，这是 #20 踩过的坑；重复项只会让命令行无谓变长。
+- `parseSyncMaxBytes`：字节数，或 `2 GiB` / `512MB` / `1.5GiB` 这类带单位写法（`GiB` 走 1024、`GB` 走 1000）；非法 → `null`，由调用方回落默认。
+
+`updateWorkspace` 也改走同一套（原来的 `parseInt("2 GiB")` 会得到 `2` 字节）。手调 HTTP 传整串、传数组、传带单位字符串，都不会写进脏数据。
+
+### 兼容性
+
+老配置没有这三个字段 → schema `default([])` / `default(0)` = **旧行为不变**（整树 + 内置 2 GiB 上限）。所有新逻辑只在「传了值」时生效；`updateWorkspaceGuards` 既有调用方（只传 `writeBack` / `writeBackExclude`）行为完全不变。
+
+### 回归测试（新增 84 条；全量 1763 通过 / 0 失败）
+
+`tests/settings-sync-scope-ui.test.mjs`：①归一化与解析的**行为**（抽真实函数跑，不是看代码里有没有写）；②schema 与三个宿主入口（含「只有传了才写」的负向控制）；③三处 `read()` 都回默认值；④客户端控件 / 弹窗 / 手动按钮 + 中英文案各恰好一份；⑤`splitList` / `bytesToGibText` / `gibTextToBytes` / `prefsForUi` 的行为。**G 段把 `updateWorkspaceGuards` / `savePrefs` 的真实函数体抽出来、注入假 `settingsFace` 执行** —— 验到 `syncPaths` 真的落库（trim + 去重 + 拆整串）、`undefined` 不改原值、`[]`/空串清空、乱填体积归 `0`（不写 NaN）、工作区不存在报错、白名单外的键不写。`tests/settings-compat.test.mjs` 同步把两个新 helper 纳入 `eval` 沙箱 —— 漏了会整文件 CRASH（本次已修）。
+
+### 复现证据（对运行中的 2.4.33 宿主，只读 + 一次无副作用重写）
+
+`POST /remote-ssh/api/listWorkspaces`：3 个工作区的 `syncPaths` / `syncExclude` 全为 `[]`、`syncMaxBytes` 全为 `0`（即全部整树同步，与举报人描述一致）。对其一发 `updateWorkspaceGuards` 并显式带上 `syncPaths: [".dsh"]` / `syncExclude: ["data/"]` / `syncMaxBytes: 1048576` → 返回 `ok:true`，但回读**三个值分毫未变**：旧构建静默忽略这三个字段。⚠️ 探针注记：该接口返回 `{"ok":true,"value":{…}}` **信封**，直接读 `body.workspaces` 会误判成「0 个工作区」（第一次探测就是这么错的，与 §0 记录的同一个坑）。
+
 ## [2.4.33] — 2026-10-17
 
 ### 性能：远程打开目录/文件的耗时治理（实机测量驱动）
