@@ -7,13 +7,46 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本地版本 / npm latest / GitHub main | **2.4.33**（2026-10-17 发布，性能：远程打开目录/文件的耗时治理 —— git.status 5s TTL+epoch 缓存 / 远端 numstat 短路 / git 专用池化会话 / 非 tty SSH 压缩 + 空闲 30min）：npm `dist-tags.latest`、tag `v2.4.33`、GitHub Release（Latest）三者一致，commit `c39eeda`（npm tarball shasum `948e8b2d9bc09d88ab37676af29bccf01dc5b08a`，8 个文件）；仓库与 npm 产物里的 `lib/index.js` 同为 SHA256 `FB001841BB0E3B0F8D298C566678B77181C44A53CC2EB6FBC2A9D63C2AF830BD`（已回下载逐字节比对）。**桌面 profile 已就地升级到 2.4.33 并重启生效**（19:58:17 `apply()` 实据；依赖号同步；未跑 pnpm；备份 `_hotfix-backup\profile-desktop-2.4.32-20261017195439\`）—— 已于 2026-10-17 重启后完成真机验证，实据见下 |
+| 本地版本 / npm latest / GitHub main | **2.4.34**（2026-10-20 发布，功能：同步范围 `syncPaths` / `syncExclude` / `syncMaxBytes` 的 GUI 入口 + 全局默认，issue #28）：npm `dist-tags.latest`、tag `v2.4.34`、GitHub Release（Latest）三者一致，commit `b7b8509`（npm tarball shasum `67c6638f814a9f18c8ae54b2915cf2591ca4db3f`，8 个文件）；仓库与 npm 产物里的 `lib/index.js` 同为 SHA256 `A90A44DFE30AB5BF939ABEE3534ABF008ABB153743D10C51C0719F5A81720CAB`、`lib/client.js` 同为 `56625E818CC7E8FA6F4C679EBE6D1572196A2E1E16D5F1F4EF25277D0CCF520A`（已回下载逐字节比对）。**桌面 profile 已就地升级到 2.4.34 并重启生效**（09:22:57 `apply()` 实据；依赖号同步；未跑 pnpm；备份 `_hotfix-backup\profile-desktop-2.4.33-20261020091934\`；`pnpm-lock.yaml` 暂落后一版属已知行为）—— 已于 2026-10-20 重启后完成真机验证，实据见下 |
 | 仓库 | https://github.com/ZhangFengshun/dsh-remote-ssh（HTTPS，分支 main） |
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
 | 发布可见性 | package.json `publishConfig.access = "public"` |
-| GitHub Release | **v2.4.33 = Latest**。有 tag 的 **29 个版本全部有 Release**。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向发布提交 `3e65aa0`，已核对它与 npm 上 2.4.18 的产物 `lib/index.js` / `lib/client.js` **blob 完全相同**。npm 上另有 50 个更早的版本从未打过 tag —— **不打算批量补**（噪音大于价值），要补就按 §3 的 `# 0c.` 走 |
+| GitHub Release | **v2.4.34 = Latest**。有 tag 的 **32 个版本全部有 Release**。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向发布提交 `3e65aa0`，已核对它与 npm 上 2.4.18 的产物 `lib/index.js` / `lib/client.js` **blob 完全相同**。npm 上另有 50 个更早的版本从未打过 tag —— **不打算批量补**（噪音大于价值），要补就按 §3 的 `# 0c.` 走 |
 | 文档（issue #21） | `~/.ssh/config` 的继承语义已按**代码**逐条写进两份 README 的故障排查表：导入 = 把 Host 块抄进连接配置；连接时以 profile 为准（总是 `-p <端口>` + `user@host`），只有 `keyPath` / `proxyJump` 留空才用 config 的值；导入侧只解析 `Host` 块（`Include` 递归）、含 `*`/`?` 的名字跳过、`Match` 块不解析 |
+
+### 2.4.34 真机验证实据（2026-10-20 重启后，运行中宿主）
+
+方法：直接打运行中宿主的 HTTP（本轮端口 **62225** —— 端口每次启动都会变，以 GUI URL 为准；必须带 `x-requested-with: XMLHttpRequest`）。
+重启实据：DSH 主进程启动 **09:22:48**，`<DSH>/remote-ssh/dsh-remote-shell.cmd` 与 `.js` 写入 **09:22:57**（2.4.34 的 `apply()`）。
+
+⚠️ 本轮新踩的两个探针坑：
+- **`curl.exe` 在 PowerShell 下 `-d '{"id":"…"}'` 会被吞引号**，服务端回 `request body is not valid JSON`（不是接口问题）；
+  改用 `--data-binary "@<UTF-8 无 BOM 文件>"`。
+- **方法级回包是 `{"ok":true,"value":{…}}` 信封**：判断成败要读 `value.ok` / `value.error`，只读外层 `ok` 会把
+  「未找到远程工作区」误判成成功（与 §0 已记录的"直接读 body.workspaces 得到 0 个工作区"同源）。
+
+1. **新字段上线（#28）**：`getPrefs` 返回 `defaultSyncPaths` / `defaultSyncExclude` / `defaultSyncMaxBytes`
+   （升级前同一接口只有 `nodePath` / `writeBackFailure` / `writeBackFreshness` 三个字段 —— 这是区分新旧构建最干脆的判据）。
+2. **工作区同步范围写入且落盘**：对 `wmvcf2fqxqjr9` 发
+   `updateWorkspaceGuards {writeBack:true, writeBackExclude:["_patch/"], syncPaths:[".dsh","docs"," .dsh "], syncExclude:["data/","*.log",""], syncMaxBytes:"1 GiB"}`
+   → 回读 `syncPaths:[".dsh","docs"]`（`" .dsh "` 被 trim 且**去重**）、`syncExclude:["data/","*.log"]`（**空串被丢**）、
+   `syncMaxBytes: 1073741824`（`"1 GiB"` 解析）；`listWorkspaces` 二次请求同值（不是回显入参）；
+   `cordis.patch.yml` 的 workspaces 段同步出现 `syncPaths:` / `syncExclude:` / `syncMaxBytes: 1073741824`。验证后已还原 `[] / [] / 0`。
+3. **全局默认往返**：`savePrefs {defaultSyncPaths:[".dsh","docs"], defaultSyncExclude:["data/"], defaultSyncMaxBytes:"512MB"}`
+   → 回读 `512000000`；`getPrefs` 独立回读一致；磁盘出现 `defaultSyncPaths` / `defaultSyncExclude` / `defaultSyncMaxBytes` 三行。验证后还原为空。
+4. **新工作区继承默认（#28 第 2/3 条）**：默认非空时 `createRemoteWorkspace {profileId, remotePath}` **不传** sync 参数
+   → 新工作区拿到 `.dsh,docs / data/ / 512000000`；随后 `deleteWorkspace` 清理干净（镜像目录一并消失，工作区数回到 3）。
+5. **显式参数优先于默认**：同一默认下 `createRemoteWorkspace {…, syncPaths:["only-this"], syncMaxBytes:1048576}`
+   → 新工作区 `["only-this"] / 1048576`（未被默认覆盖）；已删除。
+6. **负向控制**：未知工作区 → `value.ok:false`「未找到远程工作区」；`savePrefs {whatever:1}` → `value.ok:false`「没有可保存的字段」；
+   `syncMaxBytes:"乱填"` → 归 **0**（不是 NaN，也不报错）。
+7. **最终状态**：3 个工作区全部 `syncPaths: []` / `syncExclude: []` / `syncMaxBytes: 0` / `writeBack: true`（与验证前逐字段一致），
+   磁盘 `defaultSyncPaths: []` / `defaultSyncExclude: []` / `defaultSyncMaxBytes: 0`。
+
+有意**未做**的两项：① 没有真跑 `syncDown` / `syncUp` —— 那会把远端内容覆盖进镜像、可能冲掉本地未推送的改动，而同步端点本身是
+2.4.20 起的既有能力（`tests/sync-safety.test.mjs` 覆盖）；② 没有截图 UI —— GUI 需要 `dsh web` 打印的带 token URL，但客户端 bundle
+与 npm 包**逐字节一致**，且 `tests/settings-sync-scope-ui.test.mjs` 断言了控件、弹窗、按钮与中英文案。
 
 ### 2.4.33 真机验证实据（2026-10-17 重启后，运行中宿主）
 
@@ -41,9 +74,9 @@
 
 探针写法注记（踩过一次）：`/remote-ssh/api/*` 必须带 `x-requested-with` 头；其 HTTP 返回是 `{"ok":true,"value":{…}}` **信封**，
 直接读 `body.workspaces` 会得到 undefined 并误判成"0 个工作区"（`fs.*` 同样是 `value` 信封）。
-### 端点接管清单（截至 2.4.33）
+### 端点接管清单（截至 2.4.34）
 
-- 本插件以 `kind: "exact"` 接管 **31** 条路由（`/sidebar/api/fs.*` + `/sidebar/file` + `git.*`）：2.4.28 接 better-sidebar 0.25.0 的 6 个，2.4.31 接 0.26.1 的 `fs.readPage`。
+- 本插件以 `kind: "exact"` 接管 **31** 条路由（`/sidebar/api/fs.*` + `/sidebar/file` + `git.*`）：2.4.28 接 better-sidebar 0.25.0 的 6 个，2.4.31 接 0.26.1 的 `fs.readPage`。**2.4.34 无变化**（#28 只给已有端点 `updateWorkspaceGuards` / `createRemoteWorkspace` / `getPrefs` / `savePrefs` 加了字段，并复用 `syncDown` / `syncUp`，没有新增路由）。
 - `fs.readPage`：5 MiB 以上文件的只读分页预览，**128 KiB/页、页尾回退到最后一个换行**、整页无换行时原样返回，返回 `{kind,text,offset,nextOffset,eof,size,mtimeMs,encoding}`（字段名取自上游，消费方是上游预览面板，不能自创）。远端分支一次 SSH 往返取 `size/mtime` + 该页字节（`tail -c +N | head -c 131072 | base64 -w0`），**回退与解码在本地做**；失败映射成上游同款 `400 fs-error`。`path` 必填。
 - 上游升级后先跑 `tests/sidebar-0250-endpoints.test.mjs`：它会列出「本插件未接管的上游端点」并对拍文件名校验等纯函数语义。上游重构（如 0.26.1 把单段名检查拆成 `assertSingleSegmentName`）会让上游沙箱抽取失败 —— 此时补抽对应函数即可，**不要**把对拍降级成「跳过」或放宽比较。
 
