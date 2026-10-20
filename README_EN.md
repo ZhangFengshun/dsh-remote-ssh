@@ -46,7 +46,7 @@ A **DSH** plugin like **VSCode Remote-SSH**: connect to remote HPC / servers via
 **One command** (no token, API key or extra configuration needed):
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.34
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.35
 ```
 
 **Restart DSH** after installation. `@zhangfengshun/dsh-remote-ssh` must come **after** `dsh-better-sidebar` in the bundles list.
@@ -271,6 +271,7 @@ The plugin never patches DSH sources or injects into the profile dependency tree
 | Large files are truncated | 4MB per read, ≈6.29MB on the pooled download path (larger files fall back to a one-shot connection); use `remote_ssh_exec` with `head`/`tail` to page through |
 | **In a remote-workspace session a local absolute path cannot be read, and write/delete land on the remote; or a remote absolute path (`/mnt/...`, `/tmp/x.log`) never opens** | **Fixed in 2.4.30 (issue #26)**. The remote-vs-local decision used to look only at the **session cwd**: a remote-workspace session pushed the whole request into the remote branch. So ① a local absolute path was sent to the remote as `<remoteRoot>/Users/...` — reads reported `No such file`, and **if the remote happened to have that path, a different file was returned silently**, while `fs.write` never reached the local disk and `fs.remove`/`fs.rename` hit the remote; ② a remote absolute path was treated as relative and re-prefixed (`<root><root>/...`). Now every **request path** decides on its own: mirror member → mapped to the remote; drive letter / UNC (including `C:foo`) → **local**, even in a remote session; `/...` remote absolute → **passed through verbatim**; relative → resolved against the session cwd; mixing local with remote/mirror paths in one request → explicit `400`. The silent `localToRemote()` fallback was also raised from `debug` to `warn`. |
 | **"Add workspace" → the "📁 Local directory" tab immediately shows "path is required"; the tree is empty and no local workspace can be added** | **Fixed in 2.4.31 (issue #27)**: a side effect of the `localPathOf()` guard added in 2.4.27 for issue #25. The dialog is *designed* to send an empty path on first open (it means "open the home directory" — see the comment in `lib/client.js`; `localListDir()` has its own `homedir()` fallback), but the empty path was rejected outright. Now only "no session cwd + empty path + the read-only `fs.tree`" is allowed through; **writes, relative paths and every other method still fail exactly as before**. Workaround: type a full local absolute path in the field and press "Open" |
+| **In a remote workspace, "Preview" reports "file not found, it may have been moved or deleted" while right-click download of the same path works** | **Fixed in 2.4.35 (issue #29)**. The built-in preview does not use this plugin's HTTP routes: it goes through the in-process workspace-file RPC → `ctx.fs`, whose root is the **local mirror**, so any file missing from the mirror is always not-found (the other face of #15 "`read` still reads the mirror"). `ctx.fs` reads now have a shadow layer: **read locally when the mirror has it, fall back to the remote only when it does not** (still not-found when the remote lacks it too). Not covered yet: a remote-side edit stays invisible while an older copy exists in the mirror; remote changes do not trigger live refresh |
 
 ## How It Works
 
@@ -289,7 +290,7 @@ Remote reads and directory listings are cached host-side (read LRU 32 + listing 
 Known limitations:
 
 - Files changed from the integrated terminal (`ssh -tt`) or by other remote processes rely on TTL + revalidation and may be stale for up to **5 seconds**;
-- **The agent's `read` still reads the local mirror**: since 2.4.14 `write`/`edit` are mirrored to the remote, but if someone else changes the file remotely the agent reads the older mirror copy (run `remote_ssh_sync` to refresh the mirror; since 2.4.20 that operation is guarded by the size sentinel and the mirror-only-file check, so a normal mirror is never blocked);
+- **The mirror is a local-first read shadow (since 2.4.35, issue #29)**: `ctx.fs` reads (`stat` / `lstat` / `resolve` / `readText` / `streamText` / `readBytes` / `readByteRange` / `listDir`) now **use the mirror when it has the file and fall back to the remote only when it does not** — which is what makes the built-in preview and the agent's `read` work for files that exist only on the remote. Two gaps remain: ① when someone changes the file remotely while the mirror still holds an older copy, reads return the **mirror** version (local-first; `remote_ssh_sync` refreshes it); ② remote changes do **not** trigger live refresh (`ctx.fs.watch` is a no-op for the remote shadow), so previews do not update by themselves. Whole-file remote reads are also capped at 4 MiB per call;
 - The pooled `/sidebar/file` download path has an effective limit of ≈**6.29MB**; larger files automatically fall back to a one-shot connection download (succeeds, with one extra reconnect);
 - Binary content masquerading with a text extension costs one extra base64 fallback round-trip (results are still correct).
 

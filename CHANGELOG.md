@@ -2,6 +2,26 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.35] — 2026-10-20
+
+### 内置预览读不到"只在远端存在"的文件（issue #29，举报人 zijun-T）
+
+远程工作区里「文件」页签能列远端、右键下载正常、编辑器打开也正常，唯独点某个文件「预览」报 **「文件不存在，可能已被移动或删除」**；同一路径右键下载拿到的内容却是对的。举报人自己把根因定位到了：那句文案来自**内核内置**的 `dsh-client-ui-sidebar-documentpreview`，它把 `workspace-file/not-found` 映射成这句话；而提供该码的 `dsh-api-workspace-files` 的全部 I/O 都走进程内的 `ctx.fs`（`resolve` / `lstat` / `stat` / `readBytes` / `readByteRange` / `streamText` / `listDir`），它的 `workspaceRoot` 取的是**本地镜像目录** —— 镜像里没有的文件，`lstat` 就返回 `undefined`，`locateFile` 随即抛 not-found。预览走 RPC 而不是 `/sidebar/*` HTTP 路由，所以 2.4.27 / 2.4.28 那套 `exact` 路由拦截**够不着它**（与 #10 的 `fileReferences` 同属"进程内服务"这一面）。一句话：**这是 #15「read 仍读镜像」在内置预览上的另一面**，不是路径解析 bug。
+
+修法即举报人建议的方案 1：给 `ctx.fs` 的读方法加一层**影子**，原则是「**本地优先，本地缺失才回远端**」。
+
+- 每个包装方法**先调原实现**：`stat` / `lstat` 有结果、读方法没抛错，就原样透传 —— 本地工作区、镜像里已有的文件、沙箱围栏、错误码、版本号全部保持旧行为（零回归；`tests/fs-read-bridge.test.mjs` 用假 fs 断言"本地有 → 一次远端调用都没有"）。
+- 只有"本地不存在"（`stat` / `lstat` 返回 `undefined`、读方法抛 `FS_NOT_FOUND` / `ENOENT`）才回远端取：`stat` / `lstat` 用**一次往返**的条目探测（类型 + `size:mtime`，符号链接单独给 `symlink`），整文件读复用既有的合并读命令（base64 载荷 + stat 帧），区间读复用 `fs.readPage` 那条 `tail -c` 窗口命令，目录列举复用 `remoteListDir`（命中 treeCache，不多花往返）。
+- 远端也没有时**原样返回原实现的结果 / 抛原实现的错**，绝不伪造"存在"；确实是远端文件时才合成 `FsTarget`（WeakSet 标记），`contains` / `processPath` / `fileUrl` 对合成 target 走 `displayPath`，不把伪造的 key 递给原生后端（`workspace-file` 的目录围栏因此不会误杀）。
+- 错误码与后端同一套：二进制 → `FS_NOT_TEXT`、超 4 MiB → `FS_TOO_LARGE`、连接失败 → `FS_IO_ERROR`、已取消 → `FS_ABORTED`。
+- 与 2.4.14 的写桥各包各的方法、互不覆盖；两者的恢复函数都做"当前函数是否仍是我自己的包装"的身份校验。
+
+仍未覆盖（已写进两份 README 的「已知限制」）：① 远端被改动、而镜像里也有旧版本时读到的仍是**镜像**那份（本地优先；`remote_ssh_sync` 重拉即最新）；② `ctx.fs.watch` 对远端影子是空实现，远端变更**不会**触发实时刷新，预览不会自动跟新；③ 远端整文件读受 4 MiB 单次上限约束。
+
+复现与验证：举报人的自查命令（远端 `ls` 有、镜像 `ls` 没有）+ 代码路径核对（documentpreview → workspace-file RPC → `ctx.fs` → 本地 fs-sandbox）。**本机拿不到 GUI 的 token URL，无法自动点预览**，所以真机验证由重启后的宿主 + 举报人复核补上（届时把实据追加到 `MAINTENANCE.md` §0，格式同 2.4.33 / 2.4.34）。
+
+回归测试：新增 `tests/fs-read-bridge.test.mjs` **87 条**（A 条目探测命令与标记解析；B 读取器三态 / 整读 / 区间读 / 列举 / 连接异常；C 桥的本地优先、远端兜底、合成 target、错误码、安装恢复；D 接线与包装方法集合覆盖 `workspace-files` 实际调用的 12 个方法）。全量 **33 文件 / 1851 通过 / 0 失败**。
+
 ## [2.4.34] — 2026-10-20
 
 ### 同步范围终于有了 GUI 入口（issue #28，举报人 yanghuan）
