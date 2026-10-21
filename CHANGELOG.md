@@ -2,6 +2,23 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.36] — 2026-10-21
+
+### 修 2.4.35 回归：没有远程镜像的普通路径丢了 not-found 语义（issue #30，举报人 hugo2046）
+
+升级 2.4.35 后，在**没有** `<cwd>/.dsh/skills` 与 `<cwd>/.agents/skills` 的项目里，技能全部消失：系统提示里没有 `<available_skills>`，`skill` 工具对任何技能都报 `unknown or no longer available`；`~/.dsh/skills` 本身完好，重启无效，换回 2.4.34 立刻恢复。
+
+根因（举报人定位，我复核一致）：2.4.35 的读影子层在"本地不存在"时回远端取，而**该路径不在任何远程工作区镜像里**时，读取器返回的内部错误是 `FS_IO_ERROR`，包装层又把它原样抛给调用方 —— 于是本地原本的 not-found 被换成一句中文 IO 错误。`@deepseek-ai/dsh-skill-filesystem` 只把 `FS_NOT_FOUND / ENOENT / FS_NOT_DIRECTORY` 当作"这个根不存在"，其余一律按 provider 失败处理；`@deepseek-ai/dsh-tool-skill` 又有 `if (!snapshot.complete) return decision;`，结果是**整份技能目录一条都不注入**。绝大多数项目没有项目级技能目录，所以第一次 `listDir` 必踩，与用户装了多少技能无关。受影响的不止技能：任何依赖 `ctx.fs` not-found 语义的消费者（例如读一个不存在的本地文件）都会拿到错误码而不是 not-found。
+
+修法两步：
+
+1. 读取器新增专有码 **`NO_MIRROR`** 表示"该路径没有远程工作区镜像"，不再冒充 `FS_IO_ERROR`；
+2. 包装层的 `readText` / `streamText` / `readBytes` / `readByteRange` / `listDir` 统一走 `localFirst()` 收尾：**凡"远端也拿不到"（无镜像 / 远端也没有 / 连接失败）都退回本地原始错误**，语义与 2.4.34 完全一致；只有"远端确实取到了内容"之后才可能出现的语义错误（`FS_NOT_TEXT` / `FS_TOO_LARGE` / `FS_ABORTED`）照旧透出。有镜像但连接失败时留一条 `warn`（可诊断，不静默）。
+
+现场复现（本机，2.4.35 运行中）：`~/.dsh/skills` 下有 12 个技能目录、会话 cwd 无项目级技能目录 → `skill image-gen` 报 `skill "image-gen" is unknown or no longer available`，与举报人描述一致。修复后单测覆盖同一调用链（本地 not-found + 无镜像 → 抛本地错误、码为 `FS_NOT_FOUND`）；发布并重启后复验技能恢复。
+
+回归测试：`tests/fs-read-bridge.test.mjs` **+19 条**（5 个读方法在无镜像时都抛回本地原始错误、码保持 `FS_NOT_FOUND`、且不打警告；连接失败仍退本地错误但留 warn；`stat` / `lstat` 返回 `undefined`；`resolve` 抛原错；远端二进制仍透出 `FS_NOT_TEXT`；合成 target 不把内部码泄给消费者）。全量 **33 文件 / 1874 通过 / 0 失败**。
+
 ## [2.4.35] — 2026-10-20
 
 ### 内置预览读不到"只在远端存在"的文件（issue #29，举报人 zijun-T）

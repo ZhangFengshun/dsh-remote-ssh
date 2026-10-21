@@ -152,7 +152,7 @@ console.log('B · makeMirrorFsReader（假 runner）')
 
     const outsider = api.makeMirrorFsReader({ runner: fakeRunner([]), resolveMirror: mirror })
     const o = await outsider.stat('/elsewhere/a.md')
-    check(o.ok === false && o.code === 'FS_IO_ERROR', '不在已注册镜像里 → 失败（调用方保持原行为）')
+    check(o.ok === false && o.code === 'NO_MIRROR', '不在已注册镜像里 → NO_MIRROR（专有码，调用方据此保持本地语义）')
   }
 
   // B2 · readWhole / readRange
@@ -230,19 +230,27 @@ console.log('C · installFsReadBridge（假 fs 服务）')
     return { svc, calls, local }
   }
 
-  /** 假读取器：按 absPath 登记远端内容。 */
-  function fakeReader(table = {}) {
+  /** 假读取器：按 absPath 登记远端内容；`opts.mode(absPath)` 可模拟"无镜像"/"连接失败"。 */
+  function fakeReader(table = {}, opts = {}) {
     const seen = []
+    const failure = (absPath) => {
+      const mode = opts.mode ? opts.mode(absPath) : null
+      if (mode === 'no-mirror') return { ok: false, code: 'NO_MIRROR', error: '该路径不在已注册的远程工作区镜像里' }
+      if (mode === 'io-error') return { ok: false, code: 'FS_IO_ERROR', error: 'Connection reset by peer' }
+      return null
+    }
     return {
       seen,
       async stat(absPath) {
         seen.push(['stat', absPath])
+        const f = failure(absPath); if (f) return f
         const e = table[absPath]
         if (!e) return { ok: true, kind: 'absent', size: null, mtime: null }
         return { ok: true, kind: e.kind || 'file', size: e.size === undefined ? 5 : e.size, mtime: 1791796084 }
       },
       async readWhole(absPath) {
         seen.push(['readWhole', absPath])
+        const f = failure(absPath); if (f) return f
         const e = table[absPath]
         if (!e) return { ok: false, code: 'FS_NOT_FOUND', error: 'no such file' }
         const bytes = e.bytes !== undefined ? e.bytes : new Uint8Array(Buffer.from(e.text === undefined ? 'REMOTE' : e.text, 'utf8'))
@@ -250,12 +258,14 @@ console.log('C · installFsReadBridge（假 fs 服务）')
       },
       async readRange(absPath, offset, length) {
         seen.push(['readRange', absPath, offset, length])
+        const f = failure(absPath); if (f) return f
         const e = table[absPath]
         if (!e) return { ok: false, code: 'FS_NOT_FOUND', error: 'no such file' }
         return { ok: true, bytes: new Uint8Array(Buffer.from('RANGE')), size: 100 }
       },
       async list(absPath) {
         seen.push(['list', absPath])
+        const f = failure(absPath); if (f) return f
         if (!table[absPath]) return { ok: false, code: 'FS_NOT_FOUND', error: 'no such file' }
         return { ok: true, entries: [{ name: 'fig', type: 'directory', size: 0 }, { name: 'x.png', type: 'file', size: 9 }] }
       },
@@ -381,6 +391,81 @@ console.log('C · installFsReadBridge（假 fs 服务）')
     check(svc.readText === foreign, '恢复时做身份校验：别人换掉的实现不被覆盖')
     check(typeof svc.stat === 'function' && !/return await orig/.test(String(svc.stat)), '其余方法已恢复成原实现')
   }
+
+  // C6 · 「没有远程镜像」必须保持本地 not-found 语义（issue #30 回归）
+  {
+    const localErr = 'ENOENT: no such file or directory, stat G:\\proj\\.dsh\\skills'
+    const ghost = 'G:\\proj\\.dsh\\skills'
+
+    /** 本地一律不存在、远端一律 NO_MIRROR —— 正是 #30 的最小复现（项目级技能根）。 */
+    function caseNoMirror(log, reader) {
+      const { svc } = fakeFs({ local: {} })
+      svc.listDir = async () => { const e = new Error(localErr); e.code = 'FS_NOT_FOUND'; throw e }
+      svc.readText = async () => { const e = new Error(localErr); e.code = 'FS_NOT_FOUND'; throw e }
+      svc.streamText = async () => { const e = new Error(localErr); e.code = 'FS_NOT_FOUND'; throw e }
+      svc.readBytes = async () => { const e = new Error(localErr); e.code = 'FS_NOT_FOUND'; throw e }
+      svc.readByteRange = async () => { const e = new Error(localErr); e.code = 'FS_NOT_FOUND'; throw e }
+      api.installFsReadBridge(svc, { reader: reader || fakeReader({}, { mode: () => 'no-mirror' }), log })
+      return svc
+    }
+    const target = { targetKey: 'ghost', displayPath: ghost }
+    const grabErr = async (fn) => { try { await fn(); return null } catch (e) { return e } }
+
+    const warns = []
+    const svc = caseNoMirror({ warn: (m) => warns.push(m) })
+    for (const [name, call] of [
+      ['listDir', () => svc.listDir(target)],
+      ['readText', () => svc.readText(target)],
+      ['streamText', () => svc.streamText(target)],
+      ['readBytes', () => svc.readBytes(target, undefined, 4096)],
+      ['readByteRange', () => svc.readByteRange(target, { offset: 0, length: 8 })],
+    ]) {
+      const e = await grabErr(call)
+      check(e && String(e.message) === localErr, name + '：无镜像时抛回**本地原始错误**（不是「该路径不在…镜像里」）')
+      check(e && e.code === 'FS_NOT_FOUND', name + '：错误码保持 FS_NOT_FOUND（skill provider 才认得）')
+    }
+    check(warns.length === 0, '无镜像属于正常情况 → 不打警告（否则日志刷屏）')
+
+    // 有镜像但连接失败：仍按本地语义返回，但留一条诊断
+    const warns2 = []
+    const svc2 = caseNoMirror({ warn: (m) => warns2.push(m) }, fakeReader({}, { mode: () => 'io-error' }))
+    const e2 = await grabErr(() => svc2.readText(target))
+    check(e2 && e2.code === 'FS_NOT_FOUND' && String(e2.message) === localErr, '镜像存在但连接失败 → 仍抛本地错误（不把"连不上"冒充成"文件坏了"）')
+    check(warns2.some((m) => /远端读取失败/.test(m)), '连接失败留一条 warn（可诊断，不静默）')
+
+    // stat / lstat：本地没有 + 无镜像 → undefined（不是抛错）
+    const { svc: svc3 } = fakeFs({ local: {} })
+    api.installFsReadBridge(svc3, { reader: fakeReader({}, { mode: () => 'no-mirror' }) })
+    check((await svc3.stat({ targetKey: 'g', displayPath: ghost })) === undefined, 'stat：无镜像 + 本地没有 → undefined（not-found 语义）')
+    check((await svc3.lstat(ghost)) === undefined, 'lstat：无镜像 + 本地没有 → undefined')
+
+    // resolve：本地 not-found + 无镜像 → 抛原错（不是合成 target，也不是 IO 错误）
+    const { svc: svc4 } = fakeFs({ local: {} })
+    api.installFsReadBridge(svc4, { reader: fakeReader({}, { mode: () => 'no-mirror' }) })
+    const e4 = await grabErr(() => svc4.resolve(ghost + '\\missing.md'))
+    check(e4 && e4.code === 'FS_NOT_FOUND' && String(e4.message) === 'not found', 'resolve：无镜像 → 抛原 not-found 错误')
+
+    // 语义类错误照旧：本地没有、远端**确实**有但它是二进制 → FS_NOT_TEXT 必须透出
+    const binPath = 'D:\\mirror\\w1\\img\\bin'
+    const { svc: svc5 } = fakeFs({ local: {} })
+    api.installFsReadBridge(svc5, { reader: fakeReader({ [binPath]: { bytes: new Uint8Array([0x89, 0x00, 0x01]), size: 3 } }) })
+    const e5 = await grabErr(() => svc5.readText({ targetKey: 'b', displayPath: binPath }))
+    check(e5 && e5.code === 'FS_NOT_TEXT', '远端确有内容但为二进制 → FS_NOT_TEXT 仍透出（不被本地错误吞掉）')
+
+    // 合成 target（预览路径）遇到无镜像：给 FS_NOT_FOUND，而不是中文 IO 错误
+    const odd = {
+      stat: async () => ({ ok: true, kind: 'file', size: 3, mtime: 1 }),
+      readWhole: async () => ({ ok: false, code: 'NO_MIRROR', error: '该路径不在已注册的远程工作区镜像里' }),
+      readRange: async () => ({ ok: false, code: 'NO_MIRROR', error: '该路径不在已注册的远程工作区镜像里' }),
+      list: async () => ({ ok: false, code: 'NO_MIRROR', error: '该路径不在已注册的远程工作区镜像里' }),
+    }
+    const { svc: svc6 } = fakeFs({ local: {} })
+    api.installFsReadBridge(svc6, { reader: odd })
+    const synth = await svc6.resolve('D:\\mirror\\w1\\missing\\x.md')
+    const e6 = await grabErr(() => svc6.readText(synth))
+    check(e6 && e6.code === 'FS_NOT_FOUND', '合成 target + 无镜像 → FS_NOT_FOUND（不把内部码 NO_MIRROR 泄给消费者）')
+    check(!/不在已注册的远程工作区镜像里/.test(String(e6 && e6.message)), '对外错误文案不再泄露内部「无镜像」措辞')
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -403,6 +488,11 @@ console.log('D · 接线')
     check(new RegExp('"' + m + '"').test(body), '包装集合包含 ' + m + '（workspace-files 会调它）')
   }
   check(/if \(out !== undefined\) return out;/.test(body), '本地有 → 原样透传（零回归的核心判断）')
+  check(/code: "NO_MIRROR"/.test(src), '读取器用专有码 NO_MIRROR 标记"该路径没有远程镜像"（issue #30）')
+  check((body.match(/localFirst\(/g) || []).length >= 5, '读失败一律经 localFirst 收尾（本地语义优先）')
+  check(/if \(localError\) return localError;/.test(body), 'localFirst 优先返回本地原始错误（技能/provider 依赖 not-found 语义）')
+  check(/if \(code === "FS_NOT_TEXT" \|\| code === "FS_TOO_LARGE" \|\| code === "FS_ABORTED"\) return err;/.test(body),
+    '语义类错误（二进制/过大/取消）不被本地错误吞掉')
   check(/if \(!info\.ok \|\| info\.kind === "absent"\) return out;/.test(body), '远端也没有 → 返回原实现的结果（不伪造存在）')
 }
 
