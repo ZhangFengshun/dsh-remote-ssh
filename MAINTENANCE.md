@@ -7,13 +7,55 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本地版本 / npm latest / GitHub main | **2.4.34**（2026-10-20 发布，功能：同步范围 `syncPaths` / `syncExclude` / `syncMaxBytes` 的 GUI 入口 + 全局默认，issue #28）：npm `dist-tags.latest`、tag `v2.4.34`、GitHub Release（Latest）三者一致，commit `b7b8509`（npm tarball shasum `67c6638f814a9f18c8ae54b2915cf2591ca4db3f`，8 个文件）；仓库与 npm 产物里的 `lib/index.js` 同为 SHA256 `A90A44DFE30AB5BF939ABEE3534ABF008ABB153743D10C51C0719F5A81720CAB`、`lib/client.js` 同为 `56625E818CC7E8FA6F4C679EBE6D1572196A2E1E16D5F1F4EF25277D0CCF520A`（已回下载逐字节比对）。**桌面 profile 已就地升级到 2.4.34 并重启生效**（09:22:57 `apply()` 实据；依赖号同步；未跑 pnpm；备份 `_hotfix-backup\profile-desktop-2.4.33-20261020091934\`；`pnpm-lock.yaml` 暂落后一版属已知行为）—— 已于 2026-10-20 重启后完成真机验证，实据见下 |
+| 本地版本 / npm latest / GitHub main | **2.4.36**（2026-10-21 发布，内容：① 2.4.35 引入 `ctx.fs` **读影子层**修 issue #29「远程工作区预览报文件不存在」；② 2.4.36 修 2.4.35 的**回归** issue #30「无远程镜像的普通路径丢了 not-found 语义 → 技能全消失」）：npm `dist-tags.latest`、tag `v2.4.36`、GitHub Release（Latest）三者一致，commit `dbd1a22`（2.4.36；2.4.35 = `ea05b7b`）。npm tarball shasum：2.4.35 `117220ecdc7e3a934170a6e835c4c72bcc2a573d`、2.4.36 `5255553febb8392917ea0fb2fa574bba4bcce727`（各 8 个文件）；`lib/index.js` 仓库 = npm = **桌面 profile 安装侧** 同为 SHA256 `D8CE30A7F04EF130F6F6637B79FAD53266EEEA38508AC1822AFD3F4C80FB7A99`，`lib/client.js` 同为 `56625E818CC7E8FA6F4C679EBE6D1572196A2E1E16D5F1F4EF25277D0CCF520A`（已回下载逐字节比对）。**桌面 profile 两次都是 `pnpm add` 正装**（2.4.35、2.4.36），`pnpm-lock.yaml` 与 `package.json` 已同步（2.4.33 → 2.4.35 的历史漂移一并纠正）；已于 2026-10-21 09:24 重启后完成真机验证，实据见下 |
 | 仓库 | https://github.com/ZhangFengshun/dsh-remote-ssh（HTTPS，分支 main） |
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
 | 发布可见性 | package.json `publishConfig.access = "public"` |
-| GitHub Release | **v2.4.34 = Latest**。有 tag 的 **32 个版本全部有 Release**。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向发布提交 `3e65aa0`，已核对它与 npm 上 2.4.18 的产物 `lib/index.js` / `lib/client.js` **blob 完全相同**。npm 上另有 50 个更早的版本从未打过 tag —— **不打算批量补**（噪音大于价值），要补就按 §3 的 `# 0c.` 走 |
+| GitHub Release | **v2.4.34 = Latest**。有 tag 的 **34 个版本全部有 Release**（含 v2.4.35 / v2.4.36）。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向发布提交 `3e65aa0`，已核对它与 npm 上 2.4.18 的产物 `lib/index.js` / `lib/client.js` **blob 完全相同**。npm 上另有 50 个更早的版本从未打过 tag —— **不打算批量补**（噪音大于价值），要补就按 §3 的 `# 0c.` 走 |
 | 文档（issue #21） | `~/.ssh/config` 的继承语义已按**代码**逐条写进两份 README 的故障排查表：导入 = 把 Host 块抄进连接配置；连接时以 profile 为准（总是 `-p <端口>` + `user@host`），只有 `keyPath` / `proxyJump` 留空才用 config 的值；导入侧只解析 `Host` 块（`Include` 递归）、含 `*`/`?` 的名字跳过、`Match` 块不解析 |
+
+### 2.4.35 / 2.4.36 真机验证实据（2026-10-21 重启后，运行中宿主）
+
+方法：同下（HTTP 打运行中宿主，`x-requested-with` 头 + 读 `value` 信封）；本轮端口 **62882**（每次启动都变，以 GUI URL 为准）。
+重启实据：DSH 主进程启动 **09:24:21**，`<DSH>/remote-ssh/dsh-remote-shell.cmd` 写入 **09:24:30**（2.4.36 的 `apply()`）。
+（2.4.35 那轮的实据：主进程 2026-10-20 21:16:05 启动、21:16:15 写 wrapper。）
+
+**① #29 读影子层（2.4.35 主线）：远端有、镜像没有的文件能读到**
+用一个**镜像里完全没有该文件**的工作区（镜像顶层只有占位 `README.md` + `.remote-ssh.json`，远端同路径确有文件）：
+- 走**进程内 `ctx.fs`**（与内置预览同一条通道：本会话的文件读工具）读 `<mirror>/scripts/submit_gpu.sbatch` → **返回 27 行脚本正文**（远端内容）；
+- 换一个镜像里不存在的文件 `<mirror>/scripts/compare_periodic_hill_all.sh` → 返回 **52 行正文**；
+- **负向控制**：`<mirror>/scripts/__no_such_2436__.sbatch` → `not found`（远端也没有时不伪造存在）；
+- **本地优先**：镜像里已有的 `<mirror>/README.md` 仍读本地那份（内容为占位说明）。
+
+**② #30 回归：2.4.35 下技能全灭，2.4.36 恢复（含现场复现）**
+
+- **复现（2.4.35 运行中，同一台机器）**：`~/.dsh/skills` 有 12 个技能目录、`~/.agents/skills` 有 1 个；会话 cwd **没有** `.dsh/skills` / `.agents/skills` →
+  `skill image-gen` 报 `skill "image-gen" is unknown or no longer available`，系统提示里没有技能目录。与 issue #30 描述逐条一致。
+- **修复后（2.4.36 运行中）**：系统提示出现完整技能目录（14 条），`skill image-gen` **正常返回技能正文**；`getPrefs` / `listWorkspaces` 正常（3 个工作区），
+  `~/.dsh/skills` 全程未改动。
+- **根因链（已写进回归测试）**：本地 not-found → 读影子层回落 → 路径不在任何镜像里 → 旧代码抛中文 `FS_IO_ERROR` →
+  `dsh-skill-filesystem` 只认 `FS_NOT_FOUND / ENOENT / FS_NOT_DIRECTORY` → provider 崩 → `dsh-tool-skill` 的 `if (!snapshot.complete) return decision;` 把整份技能目录丢弃。
+  修法：读取器新增 `NO_MIRROR` 专有码 + 包装层 `localFirst()`（远端也拿不到就抛**本地原始错误**；`FS_NOT_TEXT` / `FS_TOO_LARGE` / `FS_ABORTED` 仍透出）。
+- **测试**：`tests/fs-read-bridge.test.mjs` 由 87 条扩到 **110 条**（新增 23 条覆盖无镜像 / 连接失败 / 语义错误 / 合成 target）；全量 **33 文件 / 1874 通过 / 0 失败**。
+
+**③ 顺带完成的插件全量更新（同一天，pnpm 正装）**
+
+| 插件 | 变化 | 结果 |
+| --- | --- | --- |
+| `@zhangfengshun/dsh-remote-ssh` | 2.4.34 → 2.4.35 → 2.4.36 | 两次 `pnpm add`；8 文件与 npm tarball 逐字节一致 |
+| `dsh-skill-mcp-panel` | **2.3.1 → 2.3.5** | 修「禁用任一 MCP 工具后宿主卡死」（上游 #59/#62）；pnpm 自动把 `dsh-skill-mcp-panel@2.3.1 \|\| 2.3.5` 加进 `minimumReleaseAgeExclude`（2.3.5 发布仅 8.5 h，24 h 冷静期绕过是显式记录） |
+| `dsh-better-sidebar` / `dsh-usage-panel` / `dsh-web-search-account` | 0.28.0 / 0.2.3 / 1.0.0 | 均已是 npm 最新（后两者是本地 tgz，npm 无对应包），无需动作 |
+
+备份：`_hotfix-backup\plugins-update-20261020214335\`（package.json / pnpm-lock.yaml / pnpm-workspace.yaml / cordis.patch.yml / 旧 2.3.1 目录）、
+`_hotfix-backup\profile-desktop-2.4.34-20261020191424\`（2.4.35 热替换前的 2.4.34 安装）。
+
+**踩坑记录（新增）**
+
+- **本轮回归的教训**：#29 的读影子层只测了「镜像内 / 远端有」两条路径，漏了「**既不在镜像、也没有任何镜像**」这条最常见的本地路径 —— 而这正是所有普通本地项目（技能根、普通文件读）每天都会走的路径。
+  以后凡是**全局包装 `ctx.fs`** 的改动，必须补一条「路径与远端无关时必须与旧版行为逐字段一致」的断言（现在 `localFirst` 与 `NO_MIRROR` 就是这条护栏）。
+- **`read` 类负向控制要选对路径**：在 2.4.35 下用「不在镜像里的不存在文件」测 `read` 时，`resolve` 会把本地原错抛出来，看起来"没问题"；
+  真正炸的是 `listDir` 一类**不做 resolve 直接列目录**的调用（技能 provider 就是这种）。探针要按消费者的真实调用形态选。
 
 ### 2.4.34 真机验证实据（2026-10-20 重启后，运行中宿主）
 
@@ -74,9 +116,9 @@
 
 探针写法注记（踩过一次）：`/remote-ssh/api/*` 必须带 `x-requested-with` 头；其 HTTP 返回是 `{"ok":true,"value":{…}}` **信封**，
 直接读 `body.workspaces` 会得到 undefined 并误判成"0 个工作区"（`fs.*` 同样是 `value` 信封）。
-### 端点接管清单（截至 2.4.34）
+### 端点接管清单（截至 2.4.36）
 
-- 本插件以 `kind: "exact"` 接管 **31** 条路由（`/sidebar/api/fs.*` + `/sidebar/file` + `git.*`）：2.4.28 接 better-sidebar 0.25.0 的 6 个，2.4.31 接 0.26.1 的 `fs.readPage`。**2.4.34 无变化**（#28 只给已有端点 `updateWorkspaceGuards` / `createRemoteWorkspace` / `getPrefs` / `savePrefs` 加了字段，并复用 `syncDown` / `syncUp`，没有新增路由）。
+- 本插件以 `kind: "exact"` 接管 **31** 条路由（`/sidebar/api/fs.*` + `/sidebar/file` + `git.*`）：2.4.28 接 better-sidebar 0.25.0 的 6 个，2.4.31 接 0.26.1 的 `fs.readPage`。**2.4.35 / 2.4.36 无变化**（#29 的读影子层是**进程内**包装 `ctx.fs`，不是 HTTP 路由；2.4.34 的 #28 只给已有端点 `updateWorkspaceGuards` / `createRemoteWorkspace` / `getPrefs` / `savePrefs` 加了字段并复用 `syncDown` / `syncUp`，同样没有新增路由）。
 - `fs.readPage`：5 MiB 以上文件的只读分页预览，**128 KiB/页、页尾回退到最后一个换行**、整页无换行时原样返回，返回 `{kind,text,offset,nextOffset,eof,size,mtimeMs,encoding}`（字段名取自上游，消费方是上游预览面板，不能自创）。远端分支一次 SSH 往返取 `size/mtime` + 该页字节（`tail -c +N | head -c 131072 | base64 -w0`），**回退与解码在本地做**；失败映射成上游同款 `400 fs-error`。`path` 必填。
 - 上游升级后先跑 `tests/sidebar-0250-endpoints.test.mjs`：它会列出「本插件未接管的上游端点」并对拍文件名校验等纯函数语义。上游重构（如 0.26.1 把单段名检查拆成 `assertSingleSegmentName`）会让上游沙箱抽取失败 —— 此时补抽对应函数即可，**不要**把对拍降级成「跳过」或放宽比较。
 
