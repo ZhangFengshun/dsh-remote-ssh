@@ -63,18 +63,49 @@ console.log('A · 回填：老记录按镜像路径反查原生 id 并落盘')
   check(writes.length === 1 && writes[0][0].shellWorkspaceId === 'native-ws-1', '结果被持久化（落在 settings 里，重启后仍在）')
 }
 
-console.log('B · 幂等：已回填的不再反查、不再写盘')
+console.log('B · 常数开销：已回填的仍校验一次，但结果一致时不写盘')
 {
   const { face, writes } = fakeSettings([
     { id: 'w1', title: 'p', remotePath: '~/p', mirrorPath: 'C:\\mirrors\\w1', shellWorkspaceId: 'native-ws-1' },
   ])
   let calls = 0
-  const registry = { resolveByPath: async () => { calls += 1; return { id: 'should-not-be-used' } } }
+  const registry = { resolveByPath: async () => { calls += 1; return { id: 'native-ws-1' } } }
   const reconcile = loadReconcile()(registry, face)
   const list = await reconcile()
-  check(calls === 0, '不产生额外 IPC（每 30s 轮询也不心疼）')
-  check(writes.length === 0, '不产生多余写盘')
+  check(calls === 1, '每次列表都核对一次（内存反查，不落盘；换来的是 id 永不过期）')
+  check(writes.length === 0, '结果与记录一致 → 不写盘（不会每 30s 抖一次 settings）')
   check(list[0].shellWorkspaceId === 'native-ws-1', '已有值保持不变')
+}
+
+console.log('B2 · 漂移自愈：原生 id 变了 / 原生工作区没了（issue #31 后续，真机暴露）')
+{
+  // 场景一：原生工作区被重建 → id 变了，必须跟上，否则永远对不上行
+  const s1 = fakeSettings([
+    { id: 'w1', title: 'zfs', remotePath: '~/run/zfs', mirrorPath: 'C:\\mirrors\\w1', shellWorkspaceId: 'old-id' },
+  ])
+  const r1 = loadReconcile()({ resolveByPath: async () => ({ id: 'new-id' }) }, s1.face)
+  const l1 = await r1()
+  check(l1[0].shellWorkspaceId === 'new-id', 'id 变了 → 跟上真实 id（不然角标永远不出现）')
+  check(s1.writes.length === 1 && s1.writes[0][0].shellWorkspaceId === 'new-id', '修正被持久化')
+  check(s1.state.workspaces[0].shellWorkspaceId === 'new-id', '内存里的 settings 也已更新（同一轮即可生效）')
+
+  // 场景二：应用重启后原生注册丢了（真机踩到的就是这条）
+  const s2 = fakeSettings([
+    { id: 'w1', title: 'zfs', remotePath: '~/run/zfs', mirrorPath: 'C:\\mirrors\\w1', shellWorkspaceId: 'vanished-id' },
+  ])
+  const r2 = loadReconcile()({ resolveByPath: async () => undefined }, s2.face)
+  const l2 = await r2()
+  check(l2[0].shellWorkspaceId === '', '原生工作区不存在 → 清空（拿不存在的 id 去猜行只会白等）')
+  check(s2.writes.length === 1, '清空也被持久化')
+
+  // 场景三：反查抛错 → 保持原值，不能因为一次异常把好 id 清掉
+  const s3 = fakeSettings([
+    { id: 'w1', title: 'zfs', remotePath: '~/run/zfs', mirrorPath: 'C:\\mirrors\\w1', shellWorkspaceId: 'good-id' },
+  ])
+  const r3 = loadReconcile()({ resolveByPath: async () => { throw new Error('registry busy') } }, s3.face)
+  const l3 = await r3()
+  check(l3[0].shellWorkspaceId === 'good-id', '反查异常 → 保持原值（不误清）')
+  check(s3.writes.length === 0, '异常时不写盘')
 }
 
 console.log('C · 反查失败/查不到：保持空值、不炸、不写盘')
