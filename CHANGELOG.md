@@ -2,6 +2,28 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.37] — 2026-10-24
+
+### 修：同名本地项目被误标成远程工作区（🌐）（issue #31，举报人 ZhanRuiXin）
+
+**现象**：新建一个与已有本地项目**同名**的远程工作区后，那个**本地**项目也被打上了地球角标（🌐）。
+
+**根因**：地球角标是客户端半边做的 DOM 装饰（壳层没有 per-workspace 图标 API，只能找到工作区行、往行首文件夹 svg 里追加一组经纬线）。旧实现**只按行标题文本**认行 —— 两个项目同名时文本完全一样，于是本地项目也命中。举报人给的猜测（"可能是按项目名称匹配导致的"）完全正确。
+
+**修法**：改用壳层自带的行键。`@deepseek-ai/dsh-client-ui-workspace` 渲染的每个工作区行都带 `data-row-key="workspace:<原生工作区 id>"`，而 `workspaceView()` 把 `workspaceId` 直接取成注册表实体的 `id`（与 `workspaceRegistry.resolveByPath()` 返回的 `id` 同一空间）。于是：
+
+1. **宿主侧**：`createRemoteWorkspace` 建区时把原生工作区 id 落进记录（`shellWorkspaceId`）；老记录没有这个字段，`listWorkspaces` 会按**镜像路径**反查 `workspaceRegistry.resolveByPath()` 回填一次并持久化 —— 幂等，全部就绪后零额外 IPC、零额外写盘；反查失败只是留空（客户端自动退回标题匹配），不影响列表可用性。
+2. **客户端**：按行键精确匹配后打标；标题匹配**只作为旧壳层回退**，且同名行不止一行时**都不标**（宁可漏标，绝不误标）。
+3. **反向自愈**：升级前被误标的行，只要扫描到它不属于远程工作区就摘掉角标，不必等 React 重渲染。
+4. **局部子树重渲染不退回标题猜**：见过行键的壳层此后只按行键判断（避免标题 span 重建时的那一小块被重新误标）。
+
+**验证**：
+
+- `tests/workspace-globe-rowkey.test.mjs`（新增，28 条）：同名本地行不标 / 远程行照标 / 箭头槽位不误加 / 幂等 / 反向自愈 / 局部子树不误标 / 旧壳层同名不标 / 自检字段。
+- `tests/workspace-shell-id.test.mjs`（新增，18 条）：按镜像路径回填、幂等不写盘、反查抛错不炸、缺 registry/mirrorPath 跳过、三处接线。
+- 全量 **35 文件 / 1920 通过 / 0 失败**。
+- 真机复核口径：本机唯一远程工作区的镜像目录在壳层工作区存储里对应 id `<uuid>`；升级后 `listWorkspaces` 返回的 `shellWorkspaceId` 应等于该 id（即行键 `workspace:<uuid>` 能对上壳层真实行）。
+
 ## [2.4.36] — 2026-10-21
 
 ### 修 2.4.35 回归：没有远程镜像的普通路径丢了 not-found 语义（issue #30，举报人 hugo2046）

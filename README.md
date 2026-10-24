@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.36
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.37
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -277,6 +277,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | **「添加工作区」→「📁 本地目录」tab 一打开就报「path 为必填项」，目录树空、无法添加本地工作区** | **2.4.31 起已修复（issue #27）**：这是 2.4.27 为修 issue #25 引入 `localPathOf()` 时误伤的 —— 弹窗首次打开会**按设计**发空路径（语义是「打开主目录」，`lib/client.js` 有注释、`localListDir()` 也有 `homedir()` 兜底），而空路径被一律判 400。现在只放行「无会话 cwd + 空路径 + `fs.tree` 这个只读方法」；**写操作、相对路径、其它方法一律照旧报错**。临时绕过：在路径栏手填完整本地绝对路径再点「打开」 |
 | **远程工作区里点「预览」报「文件不存在，可能已被移动或删除」，同一路径右键下载却正常** | **2.4.35 起已修复（issue #29）**。内置预览取内容不走本插件的 HTTP 路由，而是进程内的 workspace-file RPC → `ctx.fs`，而 `ctx.fs` 的根是**本地镜像** —— 镜像里没有的文件必然 not-found（这就是 #15「read 仍读镜像」的另一面）。现在 `ctx.fs` 的读方法有一层影子：**本地有就照旧读本地，本地没有才回远端取**；远端也没有时仍按原样报不存在。仍未覆盖：远端被改动而镜像里也有旧版本时，读到的仍是镜像那份；远端文件变更不触发实时刷新 |
 | **升级到 2.4.35 后所有技能消失（`skill` 报 unknown / 系统提示里没有技能目录）** | **2.4.36 起已修复（issue #30，2.4.35 的回归）**。2.4.35 的读影子层在"本地不存在"时会回远端取，而路径**不在任何远程镜像里**时把本地原本的 not-found 换成了中文 `FS_IO_ERROR`；`dsh-skill-filesystem` 只认 `FS_NOT_FOUND / ENOENT / FS_NOT_DIRECTORY` 为"根不存在"，于是项目级技能根（`<cwd>/.dsh/skills`，绝大多数项目没有）一列就崩，整份技能目录一条都不注入。现在"远端也拿不到"一律退回本地原始错误（新内部码 `NO_MIRROR`），语义与 2.4.34 一致；远端确有内容才出现的二进制/过大/取消错误照旧透出。临时绕过：回退到 2.4.34 |
+| **与远程工作区同名的本地项目被打上地球角标（🌐）** | **2.4.37 起已修复（issue #31）**。角标是客户端按「工作区行」贴的 DOM 装饰，旧实现只按**标题文本**认行 —— 本地项目与远程工作区同名时文本一样，于是本地那个也被标上。现在改用壳层自带的行键 `data-row-key="workspace:<原生工作区 id>"` 精确对齐（宿主侧把该 id 存进工作区记录 `shellWorkspaceId`，老记录按镜像路径自动回填）；标题匹配只作为旧壳层回退，且同名行不止一行时都不标；升级前误标的行会被自动摘掉 |
 
 ## 原理
 

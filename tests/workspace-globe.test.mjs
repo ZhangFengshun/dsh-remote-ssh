@@ -109,7 +109,7 @@ console.log('D · 标题归一化（匹配容错的基础）')
 
 console.log('E · 匹配与诊断接线（源码级断言，防止被后来者改回去）')
 {
-  check(/remoteTitles\.has\(normTitle\(el\.textContent\)\)/.test(src), '按归一化后的行文本匹配')
+  check(/var hit = remoteTitles\.has\(text\)/.test(src), '按归一化后的行文本匹配（2.4.37 起只用于旧壳层回退，主路径改按 data-row-key，见 issue #31）')
   check(/getAttribute\("title"\) \|\| el\.getAttribute\("aria-label"\)/.test(src), '容错：也看 title / aria-label 属性')
   check(/querySelectorAll\("span,div,button,a,p,\[title\],\[aria-label\]"\)/.test(src), '候选集含带 title/aria-label 的元素')
   check(/next\.add\("🌐 " \+ t\)/.test(src), '兼容自愈前的「🌐 」前缀标题（旧版行为残留）')
