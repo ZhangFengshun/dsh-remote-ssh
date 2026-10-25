@@ -2,9 +2,9 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
-## [未发布]
+## [2.4.40] — 2026-10-25
 
-### 修：密码认证从未真正可用（所有平台）——`redactSecrets: true` 在运行时抹掉了口令
+### 修：密码认证从未真正可用（所有平台）——`redactSecrets: true` 在运行时抹掉了口令（PR #33，贡献者 LPLS1zhang）
 
 **现象**：`authMethod: password` 的连接保存密码后永远连不上：连接测试 / 文件面板 / 模型工具全部挂起 120 秒后超时，或在 POSIX 上报 sshpass 相关错误。所有密码连接在所有平台上均受影响（不是 Windows 独有）。
 
