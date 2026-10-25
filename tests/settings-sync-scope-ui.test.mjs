@@ -86,10 +86,16 @@ console.log('B · 宿主：schema 与三个入口都接住新字段')
     src.indexOf('createRemoteWorkspace: async (args) => {'),
     src.indexOf('deleteWorkspace: async (args) => {')
   )
-  check(/a\.syncPaths !== undefined \? a\.syncPaths : prefsNow\.defaultSyncPaths/.test(createBody),
+  // issue #32 起建区还会「接管」同连接同路径的旧条目：取值优先级是
+  // 显式参数 > 旧记录（复用时不把用户设好的范围重置回默认） > 全局默认。
+  check(/a\.syncPaths !== undefined/.test(createBody) && /prefsNow\.defaultSyncPaths/.test(createBody),
     '建区时显式 syncPaths 优先，否则回落全局默认')
-  check(/a\.syncExclude !== undefined \? a\.syncExclude : prefsNow\.defaultSyncExclude/.test(createBody),
+  check(/existing \? existing\.syncPaths : prefsNow\.defaultSyncPaths/.test(createBody),
+    '复用旧条目时沿用该条目自己的 syncPaths（不被默认值覆盖）')
+  check(/a\.syncExclude !== undefined/.test(createBody) && /prefsNow\.defaultSyncExclude/.test(createBody),
     '建区时 syncExclude 同样回落全局默认')
+  check(/existing \? existing\.syncExclude : prefsNow\.defaultSyncExclude/.test(createBody),
+    '复用旧条目时沿用该条目自己的 syncExclude')
   check(/prefsNow\.defaultSyncMaxBytes/.test(createBody), '建区时体积上限回落全局默认')
   check(/syncPaths: normalizeSyncList\(/.test(createBody) && /syncExclude: normalizeSyncList\(/.test(createBody),
     '落库前先归一化（手调 HTTP 传整串也不会写进脏数据）')
