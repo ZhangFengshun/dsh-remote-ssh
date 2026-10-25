@@ -2,6 +2,37 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [未发布]
+
+### 修：密码认证从未真正可用（所有平台）——`redactSecrets: true` 在运行时抹掉了口令
+
+**现象**：`authMethod: password` 的连接保存密码后永远连不上：连接测试 / 文件面板 / 模型工具全部挂起 120 秒后超时，或在 POSIX 上报 sshpass 相关错误。所有密码连接在所有平台上均受影响（不是 Windows 独有）。
+
+**根因**（三层叠加）：
+
+1. **运行时读不到口令（核心）**：`createNewSettingsFace` 用 `svc.describe({ redactSecrets: true })` 读设置 —— 密钥字段被脱敏成空值，于是 `sshArgv()` 里 `p.password` 永远为空、`sshpass` 前缀从未被拼上。ssh 在管道上等待密码提示，永不返回 → 120s 超时。
+2. **Windows 没有 sshpass**：README 能力矩阵写明「密码认证需本机 sshpass（POSIX）」，Windows 无解。
+3. **失败静默化**：`CommandSession` 的 `h.done` 失败分支只置 `alive = false`、不 reject 排队命令 —— 可执行缺失（如 sshpass ENOENT）时命令挂到超时而不是立即报错。
+
+**修法**：
+
+1. **脱敏移到边界**：settingsFace 以 `redactSecrets: false` 读（运行时需要明文口令拼子进程）；新增 `publicProfiles()` —— `listProfiles` / `saveProfile` / `deleteProfile` / `remote_ssh_profiles` 等一切对外出口只回 `passwordConfigured` 布尔，不再回明文（比原先 redactSecrets 的覆盖面更宽：连 API 边界都不出）。
+2. **Windows 原生密码通道**：新增 `ensureWindowsAskpass()` —— 在 `~/.dsh/remote-ssh/` 写一个两行的 `askpass.cmd`（`@<nul set /p x="%RSSH_ASKPASS_PW%"` + `@echo.`），`sshArgv()` 经 `SSH_ASKPASS` / `SSH_ASKPASS_REQUIRE=force` 环境变量把口令交给系统 `ssh.exe`。零构建、零外部依赖。POSIX 保持 sshpass 不变。
+3. **saveProfile 密码留空 = 保留旧值**（与常见凭据表单一致；原先保存一次就把口令清空）。
+4. **fs 拦截改按 profileId 路由**：密码工作区（keyPath 为空）的文件面板从此可用。
+5. **缺口令就地报错**（非 tty 通道），不再让 ssh 挂等提示。
+6. **`h.done` 失败走 `onEnd()`**：排队命令立即 reject，不再静默挂到超时。
+
+**askpass.cmd 的三个实测要点**（对真实 sshd + OpenSSH 9.5 客户端验证）：
+
+- `set /p` 的引号保护能原样保真含 `& ^ ! 空格 引号 %` 的口令（`@echo` 会把 `&` 当命令分隔符截断）；
+- 必须补 `@echo.` 尾换行 —— OpenSSH 的 readpass 按行读，无换行会读到空口令（实测 exit 255）；
+- 文件必须无 BOM —— cmd.exe 逐行解释，BOM 挂掉首行。
+
+> 维护者补充：环境变量命名为 `RSSH_ASKPASS_PW`（不用 `DSH_` 前缀 —— 那是 `dsh-subprocess` 保留给宿主事实的命名空间，将来若收紧过滤会让口令通道静默失效）；`sshArgv()` 返回类型改为 `{ argv, env }` 后，`sync-safety` / `unicode-names` / `tool-output-schema` 三个测试桩已同步适配；Windows 上密码认证不再需要 `sshpass`（POSIX 仍需要）。
+
+**验证**：新增 `tests/password-auth.test.mjs`（26 条）：settingsFace 明文读取与边界脱敏、`sshArgv` 平台分流（Windows env 注入 / POSIX sshpass / 缺口令抛错 / tty 豁免）、密码留空保留旧值、fs 拦截 profileId 路由、askpass 助手幂等/无 BOM/元字符保真/尾换行。`tests/settings-compat.test.mjs` 的 redactSecrets 断言同步更新（`true` → `false`）。真机端到端：密码连接的连接测试 / 远程工作区文件面板 / 目录浏览 / 文件读取 / 池化会话（stdout/stderr 分离）全部通过。
+
 ## [2.4.39] — 2026-10-25
 
 ### 修：壳层删掉工作区后设置里留残条目 / 再添加同一工作区会重复 / 删重复条目连坐删会话行（issue #32，举报人 ZhanRuiXin）
