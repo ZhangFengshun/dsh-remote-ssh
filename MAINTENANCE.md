@@ -7,13 +7,26 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本地版本 / npm latest / GitHub main | **2.4.36**（2026-10-21 发布，内容：① 2.4.35 引入 `ctx.fs` **读影子层**修 issue #29「远程工作区预览报文件不存在」；② 2.4.36 修 2.4.35 的**回归** issue #30「无远程镜像的普通路径丢了 not-found 语义 → 技能全消失」）：npm `dist-tags.latest`、tag `v2.4.36`、GitHub Release（Latest）三者一致，commit `dbd1a22`（2.4.36；2.4.35 = `ea05b7b`）。npm tarball shasum：2.4.35 `117220ecdc7e3a934170a6e835c4c72bcc2a573d`、2.4.36 `5255553febb8392917ea0fb2fa574bba4bcce727`（各 8 个文件）；`lib/index.js` 仓库 = npm = **桌面 profile 安装侧** 同为 SHA256 `D8CE30A7F04EF130F6F6637B79FAD53266EEEA38508AC1822AFD3F4C80FB7A99`，`lib/client.js` 同为 `56625E818CC7E8FA6F4C679EBE6D1572196A2E1E16D5F1F4EF25277D0CCF520A`（已回下载逐字节比对）。**桌面 profile 两次都是 `pnpm add` 正装**（2.4.35、2.4.36），`pnpm-lock.yaml` 与 `package.json` 已同步（2.4.33 → 2.4.35 的历史漂移一并纠正）；已于 2026-10-21 09:24 重启后完成真机验证，实据见下 |
+| 本地版本 / npm latest / GitHub main | **2.4.39**（2026-10-25 发布，内容：① 2.4.37 修 issue #31「同名本地项目被误标 🌐」—— 地球角标改用壳层行键 `data-row-key` 精确认行；② 2.4.38 修其后续「重启丢原生注册 → `shellWorkspaceId` 永久失配」—— 每次列表核对并自愈；③ 2.4.39 修 issue #32「壳层删区不联动设置条目 / 再建同一工作区出现重复条目 / 删重复条目连坐删会话行」—— 挂 `workspaceRegistry.delete` 联动 + 建区接管旧条目 + 共用保护）：npm `dist-tags.latest`、tag `v2.4.39`、GitHub Release（Latest）三者一致，commit `c37a9b5`（2.4.38 = `55001e2`）。npm tarball 2.4.39 shasum `3d1dfa60c1be620c3ca80f0b7f0a7e892eb0a28b`（8 个文件 / 291.6 kB）；`lib/index.js` 仓库 = npm = **桌面 profile 安装侧** 同为 SHA256 `03BCEDC7AB82A8333BA8779488CB75B733F4309AE708634BAFB3E4EA5623F3F2`，`lib/client.js` 同为 `DD2DB69D8EA3B176CBB56CEE8A4D2246E8FE58195AADD73464E6F532E70F6C3E`（回下载逐字节比对）。桌面 profile 为 `pnpm add` 正装（依赖声明 2.4.39，lockfile 同步）；2026-10-25 重启后完成真机验证，实据见下 |
 | 仓库 | https://github.com/ZhangFengshun/dsh-remote-ssh（HTTPS，分支 main） |
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
 | 发布可见性 | package.json `publishConfig.access = "public"` |
-| GitHub Release | **v2.4.34 = Latest**。有 tag 的 **34 个版本全部有 Release**（含 v2.4.35 / v2.4.36）。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向发布提交 `3e65aa0`，已核对它与 npm 上 2.4.18 的产物 `lib/index.js` / `lib/client.js` **blob 完全相同**。npm 上另有 50 个更早的版本从未打过 tag —— **不打算批量补**（噪音大于价值），要补就按 §3 的 `# 0c.` 走 |
+| GitHub Release | **v2.4.39 = Latest**。（2026-10-25 核对）有 tag 的 **37 个版本全部有 Release**（含 v2.4.35 – v2.4.39）。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向 `3e65aa0`，产物 blob 与 npm 上 2.4.18 完全相同。npm 上另有 50 个更早版本从未打过 tag —— 不打算批量补（噪音大于价值），要补按 §3 的 `# 0c.` 走 |
 | 文档（issue #21） | `~/.ssh/config` 的继承语义已按**代码**逐条写进两份 README 的故障排查表：导入 = 把 Host 块抄进连接配置；连接时以 profile 为准（总是 `-p <端口>` + `user@host`），只有 `keyPath` / `proxyJump` 留空才用 config 的值；导入侧只解析 `Host` 块（`Include` 递归）、含 `*`/`?` 的名字跳过、`Match` 块不解析 |
+
+### 2.4.37 – 2.4.39 真机验证实据（2026-10-24 / 10-25，运行中宿主，DSH 0.2.1-rc.3）
+
+方法同上：HTTP 打运行中宿主（`x-requested-with` 头 + 读 `value` 信封），端口以 GUI URL 为准（每次启动都变）。
+
+- **2.4.37（issue #31）**：地球角标改按壳层行键认行；真机 `window.__dshRemoteSshGlobeStats(true)` 报 `matchedBy: "rowKey"`，与远程工作区**同名**的本地项目不再被误标。
+- **2.4.38**：壳层 `workspace.json` 会在重启后丢掉新建工作区的原生注册 → `listWorkspaces` 从「缺了才补」升级为「每次核对」：id 变了跟上、实体没了清空、反查抛错保持原值、结果一致不写盘；重启后角标恢复。
+- **2.4.39（issue #32）真机四步**：
+  1. `getPrefs` 回 `deleteSync: true` —— 说明 `workspaceRegistry.delete` 的联动钩子确实挂上了（服务实例可写、cordis 未冻结实例）。
+  2. **侧边栏删除工作区** → 设置条目**自动消失**、镜像目录被 rm 掉、壳层行消失（验证前 2 条 → 1 条）。这是 #32 第 1 条症状的正向证据。
+  3. 删完再添加同一「连接 + 远程路径」→ 只新增 **1 条**（修复前会变成两条一样）；再添加一次 → `reused: true`、条目数不变。这是 #32 第 2 条的根治证据。
+  4. 同远程路径 + **不同连接** → 各自一条（预期行为）；走本插件 API 删除时壳层行与镜像目录一并清干净。验证结束环境与验证前一致（1 个远程工作区 / 1 个镜像目录 / 4 个壳层行）。
+- **DSH 0.2.1-rc.3 兼容抽查**：peer 门禁通过；`webServer.register` / `webStartup.trustedHosts` / `settings.describe|update|configure` / `workspaceRegistry.resolveByPath|create|delete|get|list` / `ctx.fs` 的 `readText|streamText|writeText|editText|stat|lstat|resolve` / `fileReferences` / `subprocess` / `tools.register` / `loader.await` / `profileContext` 全部在位；客户端 slot 名（`conversation.hero.workspace.directoryFlow`、`sidebar.workspaces.directoryFlow`）与壳层行标记（`div.projectRow[data-row-key="workspace:<id>"]`）未变，无需改代码即可升级。
 
 ### 2.4.35 / 2.4.36 真机验证实据（2026-10-21 重启后，运行中宿主）
 
@@ -118,6 +131,7 @@
 直接读 `body.workspaces` 会得到 undefined 并误判成"0 个工作区"（`fs.*` 同样是 `value` 信封）。
 ### 端点接管清单（截至 2.4.36）
 
+- **2.4.37 – 2.4.39 期间无新增/变更路由**：三版只改内部逻辑与客户端渲染（角标认行方式、id 漂移自愈、壳层删区联动）；2.4.39 的联动挂在 `workspaceRegistry.delete` 服务方法上，不是 HTTP 端点，`getPrefs` 只是多回一个 `deleteSync` 字段。
 - 本插件以 `kind: "exact"` 接管 **31** 条路由（`/sidebar/api/fs.*` + `/sidebar/file` + `git.*`）：2.4.28 接 better-sidebar 0.25.0 的 6 个，2.4.31 接 0.26.1 的 `fs.readPage`。**2.4.35 / 2.4.36 无变化**（#29 的读影子层是**进程内**包装 `ctx.fs`，不是 HTTP 路由；2.4.34 的 #28 只给已有端点 `updateWorkspaceGuards` / `createRemoteWorkspace` / `getPrefs` / `savePrefs` 加了字段并复用 `syncDown` / `syncUp`，同样没有新增路由）。
 - `fs.readPage`：5 MiB 以上文件的只读分页预览，**128 KiB/页、页尾回退到最后一个换行**、整页无换行时原样返回，返回 `{kind,text,offset,nextOffset,eof,size,mtimeMs,encoding}`（字段名取自上游，消费方是上游预览面板，不能自创）。远端分支一次 SSH 往返取 `size/mtime` + 该页字节（`tail -c +N | head -c 131072 | base64 -w0`），**回退与解码在本地做**；失败映射成上游同款 `400 fs-error`。`path` 必填。
 - 上游升级后先跑 `tests/sidebar-0250-endpoints.test.mjs`：它会列出「本插件未接管的上游端点」并对拍文件名校验等纯函数语义。上游重构（如 0.26.1 把单段名检查拆成 `assertSingleSegmentName`）会让上游沙箱抽取失败 —— 此时补抽对应函数即可，**不要**把对拍降级成「跳过」或放宽比较。
@@ -127,6 +141,9 @@
 1. **行尾**：本仓 `core.autocrlf=true`，`git stash`/`git checkout`/`git show >` 都可能把 `lib/index.js` 变成 CRLF；而多个测试用含 `\n` 的标记切片源码，换行被改写会**整文件抛错**（不是断言失败，是异常，会掩盖同一文件里其它断言）。改完 `lib/` 下的文件后核一下「CRLF 行数应为 0」，或后续加 `.gitattributes`（`*.js text eol=lf`）一次性消除。注意 `README.md`/`README_EN.md` 本身就是 CRLF，改这两个文件要按它们自己的行尾写。
 2. **断言要能在坏状态下报红、而不是抛错**：`r.body.value.xxx` 这种直接解引用在失败路径上会抛 `TypeError`，把后面所有断言一起吞掉（只有变异控制才暴露得出来）。统一写 `!!r.body.value && r.body.value.xxx === …`。
 3. **不要往仓库里提交日期命名的目录/会话产物**（2026-10-17 用户明确要求）：一次性审计/验证脚本若值得保留，进 `scripts/` 并用描述性文件名（如 `scripts/verify-remote-status-script.mjs`），CHANGELOG 引用规范路径；不值得保留的留在仓库外。2.4.33 曾把 `audit-2026-10-17/` 提交进仓库，同日整改挪到 `scripts/`。
+
+4. **插件设置只落在 `cordis.patch.yml`，且宿主会整份重写**：远程工作区条目/连接配置/全局默认同步范围都在 `<DSH_HOME>/profiles/<profile>/cordis.patch.yml`（**不是** `settings.json`）。宿主重启时常把整份文件重写一遍，所以手改文件很可能下次启动就被覆盖；要改走插件 API / 设置面板。排查"设置到底写没写进去"必须读这个文件。
+5. **壳层删除工作区不经过插件 API**：壳层「删除工作区」只调 `workspaceRegistry.delete(id)`（`dsh-api-workspace-controller`），任何"只在自己 API 里删条目"的实现都会留孤儿条目（issue #32）。2.4.39 起靠挂接该方法联动清理，自检位是 `getPrefs` 返回的 `deleteSync`；若某天宿主把服务实例冻结或换实现，该字段会变 `false` 并打 warn，那时删区要手动清条目（宁可退化也不要静默丢配置）。
 
 ### 路径归属规则（2.4.30 起，issue #26）
 
