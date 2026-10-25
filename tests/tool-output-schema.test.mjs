@@ -105,7 +105,7 @@ const syncFns = new Function(
   npath.join, npath.dirname, npath.basename,
   (subprocess, argv, stdio) => subprocess.spawn({ argv, cwd: process.cwd(), stdio, graceMs: 60000 }),
   () => "",
-  (p, cmd) => ['ssh', '-o', 'BatchMode=yes', `${p.user}@${p.host}`, cmd],
+  (p, cmd) => ({ argv: ['ssh', '-o', 'BatchMode=yes', `${p.user}@${p.host}`, cmd], env: undefined }),
   (s) => "'" + String(s) + "'",
   (s) => String(s),
   () => {},

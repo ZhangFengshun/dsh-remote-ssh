@@ -17,7 +17,7 @@
 **修法**：
 
 1. **脱敏移到边界**：settingsFace 以 `redactSecrets: false` 读（运行时需要明文口令拼子进程）；新增 `publicProfiles()` —— `listProfiles` / `saveProfile` / `deleteProfile` / `remote_ssh_profiles` 等一切对外出口只回 `passwordConfigured` 布尔，不再回明文（比原先 redactSecrets 的覆盖面更宽：连 API 边界都不出）。
-2. **Windows 原生密码通道**：新增 `ensureWindowsAskpass()` —— 在 `~/.dsh/remote-ssh/` 写一个两行的 `askpass.cmd`（`@<nul set /p x="%DSH_REMOTE_SSH_PW%"` + `@echo.`），`sshArgv()` 经 `SSH_ASKPASS` / `SSH_ASKPASS_REQUIRE=force` 环境变量把口令交给系统 `ssh.exe`。零构建、零外部依赖。POSIX 保持 sshpass 不变。
+2. **Windows 原生密码通道**：新增 `ensureWindowsAskpass()` —— 在 `~/.dsh/remote-ssh/` 写一个两行的 `askpass.cmd`（`@<nul set /p x="%RSSH_ASKPASS_PW%"` + `@echo.`），`sshArgv()` 经 `SSH_ASKPASS` / `SSH_ASKPASS_REQUIRE=force` 环境变量把口令交给系统 `ssh.exe`。零构建、零外部依赖。POSIX 保持 sshpass 不变。
 3. **saveProfile 密码留空 = 保留旧值**（与常见凭据表单一致；原先保存一次就把口令清空）。
 4. **fs 拦截改按 profileId 路由**：密码工作区（keyPath 为空）的文件面板从此可用。
 5. **缺口令就地报错**（非 tty 通道），不再让 ssh 挂等提示。
@@ -28,6 +28,8 @@
 - `set /p` 的引号保护能原样保真含 `& ^ ! 空格 引号 %` 的口令（`@echo` 会把 `&` 当命令分隔符截断）；
 - 必须补 `@echo.` 尾换行 —— OpenSSH 的 readpass 按行读，无换行会读到空口令（实测 exit 255）；
 - 文件必须无 BOM —— cmd.exe 逐行解释，BOM 挂掉首行。
+
+> 维护者补充：环境变量命名为 `RSSH_ASKPASS_PW`（不用 `DSH_` 前缀 —— 那是 `dsh-subprocess` 保留给宿主事实的命名空间，将来若收紧过滤会让口令通道静默失效）；`sshArgv()` 返回类型改为 `{ argv, env }` 后，`sync-safety` / `unicode-names` / `tool-output-schema` 三个测试桩已同步适配；Windows 上密码认证不再需要 `sshpass`（POSIX 仍需要）。
 
 **验证**：新增 `tests/password-auth.test.mjs`（26 条）：settingsFace 明文读取与边界脱敏、`sshArgv` 平台分流（Windows env 注入 / POSIX sshpass / 缺口令抛错 / tty 豁免）、密码留空保留旧值、fs 拦截 profileId 路由、askpass 助手幂等/无 BOM/元字符保真/尾换行。`tests/settings-compat.test.mjs` 的 redactSecrets 断言同步更新（`true` → `false`）。真机端到端：密码连接的连接测试 / 远程工作区文件面板 / 目录浏览 / 文件读取 / 池化会话（stdout/stderr 分离）全部通过。
 

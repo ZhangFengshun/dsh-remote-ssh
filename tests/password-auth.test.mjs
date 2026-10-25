@@ -114,7 +114,7 @@ console.log('B · sshArgv 平台分流')
   if (process.platform === 'win32') {
     check(built.argv[0] && String(built.argv[0]).toLowerCase().includes('ssh'), 'B1(w) argv[0] 是 ssh 客户端（无 sshpass 前缀）')
     check(built.env && built.env.SSH_ASKPASS && built.env.SSH_ASKPASS_REQUIRE === 'force', 'B2(w) env 带 SSH_ASKPASS + force')
-    check(built.env && built.env.DSH_REMOTE_SSH_PW === 'pw123', 'B3(w) 口令经环境变量传递')
+    check(built.env && built.env.RSSH_ASKPASS_PW === 'pw123', 'B3(w) 口令经环境变量传递')
     check(!built.argv.some(a => String(a).includes('pw123')), 'B4(w) argv 里不出现明文口令')
   } else {
     check(built.argv[0] === 'sshpass' && built.argv[1] === '-p' && built.argv[2] === 'pw123', 'B1(p) POSIX 前置 sshpass -p')
@@ -141,8 +141,10 @@ console.log('C · saveProfile 密码留空保留旧值（源码断言）')
 
 console.log('D · fs 拦截按 profileId 路由（源码断言）')
 {
-  check(src.includes('remoteInfo && remoteInfo.profileId && remoteInfo.host && remoteInfo.user'),
-    'D1 拦截条件用 profileId（密码工作区文件面板可用）')
+  // 条件形如 (profileId || keyPath)：有 profileId 就走远端（密码工作区可用）；手写的
+  // .remote-ssh.json 只有 keyPath 时也照旧走进来并明确报错，绝不静默回落到本地路径。
+  check(/remoteInfo\.host && remoteInfo\.user && \(remoteInfo\.profileId \|\| remoteInfo\.keyPath\)/.test(src),
+    'D1 拦截条件为 profileId 或 keyPath（密码工作区可用，手写配置仍响亮失败）')
   check(!src.includes('remoteInfo && remoteInfo.keyPath && remoteInfo.host && remoteInfo.user'),
     'D2 旧的 keyPath 前置条件已移除')
 }
@@ -162,7 +164,7 @@ console.log('E · ensureWindowsAskpass 助手')
   const head = readFileSync(file).subarray(0, 3)
   check(!(head[0] === 0xEF && head[1] === 0xBB && head[2] === 0xBF), 'E4 无 BOM（BOM 会挂掉首行命令）')
   const body = readFileSync(file, 'utf8')
-  check(body.includes('@<nul set /p x="%DSH_REMOTE_SSH_PW%"'), 'E4b 第一行 set /p 引号保护（口令元字符保真）')
+  check(body.includes('@<nul set /p x="%RSSH_ASKPASS_PW%"'), 'E4b 第一行 set /p 引号保护（口令元字符保真）')
   check(/^@echo\./m.test(body), 'E4c 第二行 @echo. 补尾换行（readpass 按行读，无换行会读到空口令）')
   if (process.platform === 'win32') {
     // 有的受限运行环境（沙箱 CI runner）禁止 spawnSync —— 防御性降级，不让测试 crash。
@@ -180,7 +182,7 @@ console.log('E · ensureWindowsAskpass 助手')
         try { rmSync(outFile, { force: true }) } catch (e) {}
         // set /p 读 nul 返回非零退出码 —— & exit 0 归一，判输出不判退出码
         execFileSync('cmd.exe', ['/c', file + ' > ' + outFile + ' & exit 0'], {
-          env: { ...process.env, DSH_REMOTE_SSH_PW: pw },
+          env: { ...process.env, RSSH_ASKPASS_PW: pw },
           stdio: 'ignore'
         })
         return readFileSync(outFile, 'utf8').replace(/\r?\n$/, '')
@@ -198,7 +200,7 @@ console.log('E · ensureWindowsAskpass 助手')
         // 直接读原始字节验证尾换行
         try { rmSync(outFile, { force: true }) } catch (e) {}
         execFileSync('cmd.exe', ['/c', file + ' > ' + outFile + ' & exit 0'], {
-          env: { ...process.env, DSH_REMOTE_SSH_PW: 't' }, stdio: 'ignore'
+          env: { ...process.env, RSSH_ASKPASS_PW: 't' }, stdio: 'ignore'
         })
         probe = readFileSync(outFile, 'utf8')
       } catch (e) { console.log('      E6 运行失败: ' + (e && e.code ? e.code : e.message)) }
@@ -206,7 +208,7 @@ console.log('E · ensureWindowsAskpass 助手')
       try { rmSync(outFile, { force: true }) } catch (e) {}
     } else {
       console.log('  （受限环境无法 spawn cmd.exe：E5/E6 降级为源码断言）')
-      check(readFileSync(file, 'utf8').includes('set /p x="%DSH_REMOTE_SSH_PW%"'), 'E5(降级) 助手源码含 set /p 引号保护')
+      check(readFileSync(file, 'utf8').includes('set /p x="%RSSH_ASKPASS_PW%"'), 'E5(降级) 助手源码含 set /p 引号保护')
     }
   } else {
     console.log('  （非 Windows：跳过 E5/E6 真机 cmd 检查）')

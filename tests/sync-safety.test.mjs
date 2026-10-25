@@ -153,7 +153,7 @@ function build(opts) {
   )(
     process, loggedRm, mkdir, rename, cp, readdir, stat, readFile, writeFile, existsSync,
     join, dirname, basename, spawnOne, readCollected,
-    (p, cmd) => ['ssh', '-o', 'BatchMode=yes', p.user + '@' + p.host, cmd],
+    (p, cmd) => ({ argv: ['ssh', '-o', 'BatchMode=yes', p.user + '@' + p.host, cmd], env: undefined }),
     realShellQuote, (s) => "'" + String(s) + "'",
     (p) => { cleared.push(p.id) },
     (n, rp) => '# 🌐 Remote Workspace / 远程工作区\n\n- Profile: ' + n + '\n- Root: ' + rp + '\n'
