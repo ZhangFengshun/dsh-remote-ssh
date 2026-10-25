@@ -7,14 +7,29 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本地版本 / npm latest / GitHub main | **2.4.39**（2026-10-25 发布，内容：① 2.4.37 修 issue #31「同名本地项目被误标 🌐」—— 地球角标改用壳层行键 `data-row-key` 精确认行；② 2.4.38 修其后续「重启丢原生注册 → `shellWorkspaceId` 永久失配」—— 每次列表核对并自愈；③ 2.4.39 修 issue #32「壳层删区不联动设置条目 / 再建同一工作区出现重复条目 / 删重复条目连坐删会话行」—— 挂 `workspaceRegistry.delete` 联动 + 建区接管旧条目 + 共用保护）：npm `dist-tags.latest`、tag `v2.4.39`、GitHub Release（Latest）三者一致，commit `c37a9b5`（2.4.38 = `55001e2`）。npm tarball 2.4.39 shasum `3d1dfa60c1be620c3ca80f0b7f0a7e892eb0a28b`（8 个文件 / 291.6 kB）；`lib/index.js` 仓库 = npm = **桌面 profile 安装侧** 同为 SHA256 `03BCEDC7AB82A8333BA8779488CB75B733F4309AE708634BAFB3E4EA5623F3F2`，`lib/client.js` 同为 `DD2DB69D8EA3B176CBB56CEE8A4D2246E8FE58195AADD73464E6F532E70F6C3E`（回下载逐字节比对）。桌面 profile 为 `pnpm add` 正装（依赖声明 2.4.39，lockfile 同步）；2026-10-25 重启后完成真机验证，实据见下 |
+| 本地版本 / npm latest / GitHub main | **2.4.40**（2026-10-25 发布，内容：**密码认证修复（PR #33，贡献者 LPLS1zhang）** —— `password` 是 `.role("secret")` 字段，`describe({redactSecrets:true})` 读出来是空串，于是 `sshArgv()` 里的 `sshpass -p` 前缀从未拼上，**密码认证在所有平台从上线起就没有可用路径**（表现是连接挂到 120 s 超时，无任何指向口令的报错）。修法：运行时改 `redactSecrets:false` 读明文，对外出口新增 `publicProfiles()` 只回 `passwordConfigured`；Windows 走系统 OpenSSH 原生 `SSH_ASKPASS`（`RSSH_ASKPASS_PW` 环境变量 + 不含口令的 `askpass.cmd`，零依赖），POSIX 保持 `sshpass`；另修 `saveProfile` 空口令会清空旧值、fs 拦截按 `profileId` 路由（密码工作区文件面板）、`h.done` 失败立即 `onEnd()` 不再静默挂到超时。前序：2.4.39 修 issue #32「壳层删区不联动设置条目 / 重复条目 / 连坐删会话行」，2.4.38 修「重启丢原生注册」，2.4.37 修 issue #31「同名本地项目被误标 🌐」）：npm `dist-tags.latest`、tag `v2.4.40`、GitHub Release（Latest）三者一致，commit `8db3e6b`（合并提交 `c1ace56`；2.4.39 = `c37a9b5`，2.4.38 = `55001e2`）。npm tarball 2.4.40 shasum `114cdd3508059dd6135c1d889b906ff58b979bc5`（8 个文件 / 295.3 kB / 解开 848,298 B）；`lib/index.js` 仓库 = npm = **桌面 profile 安装侧** 同为 SHA256 `9077DBEA8527D14E7B04AAFEC56DD495370146EA7EA273F85196E33E0EA37A7E`，`lib/client.js` 同为 `CE1770869AD5AFC9DD53A9F08F986F4742CBAE92B808C644D648AC1FF2289363`（逐文件比对）。桌面 profile 为 `pnpm add` 正装（依赖声明 2.4.40）；**重启后需自行复验 `getPrefs`**（本版无新增路由，`listProfiles` 的出参多了 `passwordConfigured`、不再回明文） |
 | 仓库 | https://github.com/ZhangFengshun/dsh-remote-ssh（HTTPS，分支 main） |
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
 | 发布可见性 | package.json `publishConfig.access = "public"` |
-| GitHub Release | **v2.4.39 = Latest**。（2026-10-25 核对）有 tag 的 **37 个版本全部有 Release**（含 v2.4.35 – v2.4.39）。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向 `3e65aa0`，产物 blob 与 npm 上 2.4.18 完全相同。npm 上另有 50 个更早版本从未打过 tag —— 不打算批量补（噪音大于价值），要补按 §3 的 `# 0c.` 走 |
+| GitHub Release | **v2.4.40 = Latest**。（2026-10-25 核对）有 tag 的 **38 个版本全部有 Release**（含 v2.4.35 – v2.4.40）。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向 `3e65aa0`，产物 blob 与 npm 上 2.4.18 完全相同。npm 上另有 50 个更早版本从未打过 tag —— 不打算批量补（噪音大于价值），要补按 §3 的 `# 0c.` 走 |
 | 文档（issue #21） | `~/.ssh/config` 的继承语义已按**代码**逐条写进两份 README 的故障排查表：导入 = 把 Host 块抄进连接配置；连接时以 profile 为准（总是 `-p <端口>` + `user@host`），只有 `keyPath` / `proxyJump` 留空才用 config 的值；导入侧只解析 `Host` 块（`Include` 递归）、含 `*`/`?` 的名字跳过、`Match` 块不解析 |
 
+### 2.4.40 发布实据（2026-10-25，密码通道逐环离线验证）
+
+**合并与 CI**：PR #33（外部贡献者 LPLS1zhang，`fix/password-auth-runtime`）以 merge commit `c1ace56` 合入 main，
+合并前维护者在其分支上补了一个提交 `d985895`（env 命名、fs 拦截兜底、三处测试桩、文案文档）；
+PR 工作流对首次贡献者默认 `action_required`，由维护者放行后 **full-suite pass**（2m18s）；发布提交 `8db3e6b` 的 push CI 同样绿。
+全量本地：**37 文件 / 1997 断言 / 0 失败**。
+
+**四环离线验证**（缺真实密码 sshd，逐环单验而不是端到端）：
+1. `dsh-settings` 的 `describe()`：`value: options?.redactSecrets ? redacted.value : value` —— 传 `false` 才拿得到 `.role("secret")` 字段的明文，这条既是根因也是修法的依据。
+2. `dsh-subprocess-local` 的 `childEnv()`："先清洗父环境、再合并调用方显式 `env`"（win32 走大小写不敏感覆盖），只拒绝控制通道变量 —— 所以 `SSH_ASKPASS` / `SSH_ASKPASS_REQUIRE` / 口令变量都能到达 `ssh.exe`。
+3. 本机客户端 OpenSSH_for_Windows **9.5p2** 支持 `SSH_ASKPASS_REQUIRE=force`（需 8.4+）。
+4. `askpass.cmd` 元字符保真：照实现的两行写法单独生成脚本，12 组口令（含 `&` `^` `!` `%` 双引号 空格 `|` `<` `>`）经 `cmd /c` 逐字节比对 **12/12 全对**，尾换行正确、无 BOM。
+
+**未做（诚实记录）**：本机 `<profile>` 的 2 条连接都是密钥认证、**没有存密码**，因此没有「真实 sshd + 密码」的端到端实据；
+等有密码测试机时按 §「2.4.39 真机四步」的方法补一轮（连接测试 + 文件面板 + 池化会话 stdout/stderr 分离）。
 ### 2.4.37 – 2.4.39 真机验证实据（2026-10-24 / 10-25，运行中宿主，DSH 0.2.1-rc.3）
 
 方法同上：HTTP 打运行中宿主（`x-requested-with` 头 + 读 `value` 信封），端口以 GUI URL 为准（每次启动都变）。
@@ -144,6 +159,13 @@
 
 4. **插件设置只落在 `cordis.patch.yml`，且宿主会整份重写**：远程工作区条目/连接配置/全局默认同步范围都在 `<DSH_HOME>/profiles/<profile>/cordis.patch.yml`（**不是** `settings.json`）。宿主重启时常把整份文件重写一遍，所以手改文件很可能下次启动就被覆盖；要改走插件 API / 设置面板。排查"设置到底写没写进去"必须读这个文件。
 5. **壳层删除工作区不经过插件 API**：壳层「删除工作区」只调 `workspaceRegistry.delete(id)`（`dsh-api-workspace-controller`），任何"只在自己 API 里删条目"的实现都会留孤儿条目（issue #32）。2.4.39 起靠挂接该方法联动清理，自检位是 `getPrefs` 返回的 `deleteSync`；若某天宿主把服务实例冻结或换实现，该字段会变 `false` 并打 warn，那时删区要手动清条目（宁可退化也不要静默丢配置）。
+
+6. **`role("secret")` 的字段在运行时读不到（2026-10-25，PR #33 的根因）**：settings schema 里标了 `.role("secret")` 的字段，
+   `settings.describe({ redactSecrets: true })` 读出来就是空串 —— 而插件拼 `sshpass -p …` 正是从这次读的结果取 `p.password`，
+   于是"密码认证"从 v1 起就没有任何可用路径，表现是连接挂到 120 s 超时、**没有任何报错指向口令**。纪律：
+   **运行时取明文用 `redactSecrets: false`，对外出口（HTTP API / 模型工具）必须自己剥**；2.4.40 起 `listProfiles` / `saveProfile` /
+   `deleteProfile` / `remote_ssh_profiles` 一律只回 `passwordConfigured: true|false`。新增字段/出口时照此办理，
+   别把"脱敏"责任留给读取侧。
 
 ### 路径归属规则（2.4.30 起，issue #26）
 
