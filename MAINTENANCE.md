@@ -7,14 +7,27 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本地版本 / npm latest / GitHub main | **2.4.40**（2026-10-25 发布，内容：**密码认证修复（PR #33，贡献者 LPLS1zhang）** —— `password` 是 `.role("secret")` 字段，`describe({redactSecrets:true})` 读出来是空串，于是 `sshArgv()` 里的 `sshpass -p` 前缀从未拼上，**密码认证在所有平台从上线起就没有可用路径**（表现是连接挂到 120 s 超时，无任何指向口令的报错）。修法：运行时改 `redactSecrets:false` 读明文，对外出口新增 `publicProfiles()` 只回 `passwordConfigured`；Windows 走系统 OpenSSH 原生 `SSH_ASKPASS`（`RSSH_ASKPASS_PW` 环境变量 + 不含口令的 `askpass.cmd`，零依赖），POSIX 保持 `sshpass`；另修 `saveProfile` 空口令会清空旧值、fs 拦截按 `profileId` 路由（密码工作区文件面板）、`h.done` 失败立即 `onEnd()` 不再静默挂到超时。前序：2.4.39 修 issue #32「壳层删区不联动设置条目 / 重复条目 / 连坐删会话行」，2.4.38 修「重启丢原生注册」，2.4.37 修 issue #31「同名本地项目被误标 🌐」）：npm `dist-tags.latest`、tag `v2.4.40`、GitHub Release（Latest）三者一致，commit `8db3e6b`（合并提交 `c1ace56`；2.4.39 = `c37a9b5`，2.4.38 = `55001e2`）。npm tarball 2.4.40 shasum `114cdd3508059dd6135c1d889b906ff58b979bc5`（8 个文件 / 295.3 kB / 解开 848,298 B）；`lib/index.js` 仓库 = npm = **桌面 profile 安装侧** 同为 SHA256 `9077DBEA8527D14E7B04AAFEC56DD495370146EA7EA273F85196E33E0EA37A7E`，`lib/client.js` 同为 `CE1770869AD5AFC9DD53A9F08F986F4742CBAE92B808C644D648AC1FF2289363`（逐文件比对）。桌面 profile 为 `pnpm add` 正装（依赖声明 2.4.40）；**重启后需自行复验 `getPrefs`**（本版无新增路由，`listProfiles` 的出参多了 `passwordConfigured`、不再回明文） |
+| 本地版本 / npm latest / GitHub main | **2.4.41**（2026-10-27 发布，内容：**修 DSH 0.1.5 / 0.1.6 线上的 settings 代际误判（issue #34，报告者 EmptyVessel-000）** —— 判据此前只看 `svc.describe` / `svc.update` 存不存在，而这两代 **`register()` 与新三件套同时在**、却还没把 loader 行的 Config 注册成 settings 命名空间，于是误走 0.1.7+ 新分支：`describe()` 看不到本插件（读恒空）、`update()` 抛 `settings namespace "remote-ssh" is not registered`（写必失败），表现为「连接列表永远为空、导入与保存都没反应」。修法：新增 `settingsApiMode(svc, entryId)` 三态判定（`new` / `legacy` / `config`），两套接口都在时**只有 `describe({redactSecrets:false})` 真能看到本插件命名空间才走新路径**；探测抛错按 legacy 处理；`register()` 抛错退只读 config + warn，插件照常挂载。前序：2.4.40 修密码认证从未可用（PR #33），2.4.39 修 issue #32，2.4.38 修重启丢原生注册，2.4.37 修 issue #31）：npm `dist-tags.latest`、tag `v2.4.41`、GitHub Release（Latest）三者一致，commit `e77dc19`（2.4.40 = `0ebfb04` 文档 / `8db3e6b` 发布，2.4.39 = `c37a9b5`）。npm tarball 2.4.41 shasum `3ed83a0870bd207cdc660f07e318b72d08f7528f`（8 个文件 / 297.4 kB / 解开 853,364 B）；`lib/index.js` 仓库 = npm = **桌面 profile 安装侧** 同为 SHA256 `5D338B4E60BF69156F5FBFD5E3D9FA4AA88FDE1FCD2544F83161C2E638E53EE9`，`lib/client.js` 同为 `CE1770869AD5AFC9DD53A9F08F986F4742CBAE92B808C644D648AC1FF2289363`。桌面 profile 为 `pnpm add` 正装（依赖声明 2.4.41），启动等价校验（`--frozen-lockfile --config.minimumReleaseAge=1440`）通过 |
 | 仓库 | https://github.com/ZhangFengshun/dsh-remote-ssh（HTTPS，分支 main） |
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
 | 发布可见性 | package.json `publishConfig.access = "public"` |
-| GitHub Release | **v2.4.40 = Latest**。（2026-10-25 核对）有 tag 的 **38 个版本全部有 Release**（含 v2.4.35 – v2.4.40）。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向 `3e65aa0`，产物 blob 与 npm 上 2.4.18 完全相同。npm 上另有 50 个更早版本从未打过 tag —— 不打算批量补（噪音大于价值），要补按 §3 的 `# 0c.` 走 |
+| GitHub Release | **v2.4.41 = Latest**。（2026-10-27 核对）有 tag 的 **39 个版本全部有 Release**（含 v2.4.35 – v2.4.41）。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向 `3e65aa0`，产物 blob 与 npm 上 2.4.18 完全相同。npm 上另有 50 个更早版本从未打过 tag —— 不打算批量补（噪音大于价值），要补按 §3 的 `# 0c.` 走 |
 | 文档（issue #21） | `~/.ssh/config` 的继承语义已按**代码**逐条写进两份 README 的故障排查表：导入 = 把 Host 块抄进连接配置；连接时以 profile 为准（总是 `-p <端口>` + `user@host`），只有 `keyPath` / `proxyJump` 留空才用 config 的值；导入侧只解析 `Host` 块（`Include` 递归）、含 `*`/`?` 的名字跳过、`Match` 块不解析 |
 
+### 2.4.41 发布实据（2026-10-27，issue #34）
+
+**现象与根因**：DSH 0.1.5-rc.3 上「连接列表永远为空、导入与保存都没反应」。0.1.5 / 0.1.6 的 `settings`
+同时有 `register()` 与 `configure/describe/update`，但那一代没有把 loader 行的 Config 注册成 settings
+命名空间 —— 判据只看接口存在性 → 误走 0.1.7+ 新分支 → 读恒空、写抛 `namespace not registered`。
+这是 #16 的镜像（0.1.7 拿掉 `register` 那一侧）。
+
+**修法与验证**：`settingsApiMode(svc, entryId)` 三态判定；两套都在时以「`describe({redactSecrets:false})`
+能否看到本插件命名空间」为准，探测抛错按 legacy；`register()` 抛错退只读 config + warn。
+新增 `tests/settings-api-mode.test.mjs`（25 条，含变异负向控制）；全量 **38 文件 / 2022 断言 / 0 失败**；
+0.2.x 路径零行为变化（运行中宿主的 `dsh-settings` 里 `register(` 出现 0 次）。
+
+**未做（诚实记录）**：本机只有 0.2.1-rc.3，0.1.5 安装包已不在，无法真机复现；按报告者给出的现场语义做等价仿真。
 ### 2.4.40 发布实据（2026-10-25，密码通道逐环离线验证）
 
 **合并与 CI**：PR #33（外部贡献者 LPLS1zhang，`fix/password-auth-runtime`）以 merge commit `c1ace56` 合入 main，
@@ -166,6 +179,13 @@ PR 工作流对首次贡献者默认 `action_required`，由维护者放行后 *
    **运行时取明文用 `redactSecrets: false`，对外出口（HTTP API / 模型工具）必须自己剥**；2.4.40 起 `listProfiles` / `saveProfile` /
    `deleteProfile` / `remote_ssh_profiles` 一律只回 `passwordConfigured: true|false`。新增字段/出口时照此办理，
    别把"脱敏"责任留给读取侧。
+
+7. **「接口存不存在」不能当 API 代际判据（2026-10-27，issue #34）**：settings 在 0.1.5 / 0.1.6 上
+   **两套接口同时在**（`register()` + `configure/describe/update`），但 entry 命名空间尚未注册。
+   只看接口存在性 → 误判成新版 → 读恒空、写抛错，功能整块静默失效（用户只看到「列表是空的」）。
+   纪律：**判据要问「这条路现在真的能用吗」，而不是「这个方法存在吗」** —— 我们能探测就探测
+   （`describe()` 里有没有本插件命名空间），探测失败时退到保守的旧路径；迁移期两条路都保留、都带
+   兜底（`register()` 抛错退只读 config + 一行 warn，而不是让 `apply()` 抛错导致插件不加载）。
 
 ### 路径归属规则（2.4.30 起，issue #26）
 
