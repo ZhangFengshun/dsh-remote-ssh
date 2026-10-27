@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.40
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.41
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -218,7 +218,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | DSH | **0.2.1-rc.1**（DeepSeek Harness 桌面端 nightly，2026-10-17 实测） | ✅ 2.4.32 起适配：信任源从已被移除的 `ctx.webRuntime.trustedHosts` 迁到 **`ctx.webStartup.trustedHosts`**（两个都软注入，老宿主自动退回旧源、都没有则 loopback-only），`--trusted-host` 的远程访问路径因此真正生效；三个 DSH peer 显式补上 `^0.2.1-rc.1`，**不再依赖宿主是否传 `includePrerelease`**；逐 API 复核 `webServer`/`subprocess`/`settings`/`slots`/`locale`/`defineTool`/cordis 生命周期全部未变（13 个工具注册通过，`testConnection` 实测 200），本插件零 warn/零 error。⚠️ 宿主新增的"监听绑定 IP 即受信"例外本插件**不跟随**（有意更严：本插件路由在宿主浏览器令牌认证之外，需要远程访问请显式 `--trusted-host`） |
 | DSH | **0.2.0-rc.1**（DeepSeek Harness 桌面端 nightly，2026-09-28） | ✅ 2.4.16 起适配并真机验证：peer 范围显式列出该版本线（否则 harness 会**拒绝安装/激活**）；`settings` 新 API 与旧数据迁移继续有效（实测升级后首次启动即恢复全部连接与工作区）；终端 patch 仍命中 `terminal-controller`。客户端注入清单同步移除运行时已不提供的 `dsh-client-runtime`；2.4.17 修好浅色主题下"工作区地球角标不可见"（颜色改为取图标自身计算色） |
 | DSH | **0.1.7-rc.2**（DSH Desktop v2.0.15） | ✅ 2.4.15 起适配：`settings` 新 API（`configure`/`describe`/`update`，数据存于本插件 entry 的 Config，字段标 `.volatile()`）+ **旧 `settings.yaml` 一次性迁移**（连接/工作区 ID 与 mirrorPath 全保留，无需重建）；侧边栏终端改由宿主原生 `terminal-controller` 管理，patch 已同时覆盖它与 `better-sidebar` |
-| DSH | 0.1.5-rc.1 / 0.1.0-rc.6 线 | ✅ 主机服务 / settings / tools / slot / 上传下载拦截全部咬合（peer 范围继续覆盖） |
+| DSH | 0.1.5-rc.1 / 0.1.6 线 / 0.1.0-rc.6 线 | ✅ 主机服务 / settings / tools / slot / 上传下载拦截全部咬合（peer 范围继续覆盖）；⚠️ **2.4.40 及更早**在这一代上会误判 settings 代际（两套接口都在 → 走 0.1.7+ 新分支 → 读恒空、写抛 `namespace not registered`，表现为「连接列表永远为空、导入与保存都没反应」，issue #34），**2.4.41 起修复** |
 | DSH | 0.1.2-rc.1 稳定线 | ✅（插件 2.3.x 时代基线） |
 | dsh-better-sidebar | 0.15.0 – 0.18.0 | ✅ `fs.tree`/`fs.read`/`fs.write` + `fs.search`（`{ matches: cwd 相对 '/'-分隔路径, truncated }` 契约，2.4.11 起；此前只回 `entries` 会让「按文件名搜索」崩掉整块页签） |
 | dsh-better-sidebar | 0.19.x | ⚠️ 插件侧已适配 6 端点（含 `fs.rename`/`fs.remove`）；但 0.19.0/0.19.1 自身在 DSH Desktop 上主机半边无法加载，需等上游修复（见[安装](#安装)的警告） |

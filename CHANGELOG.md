@@ -2,6 +2,18 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.41] — 2026-10-27
+
+### 修：DSH 0.1.5 / 0.1.6 线上「连接列表恒为空、导入与保存都无效」（issue #34，举报人 EmptyVessel-000）
+
+**现象**：DSH 0.1.5-rc.3 上，设置 → 远程连接永远显示「还没有连接配置」；「从 ~/.ssh/config 导入」与手动保存都没反应，`remote_ssh_profiles` 恒回 `profiles: []`，`settings.yaml` 里不落任何东西。
+
+**根因**：判据只看接口存不存在 —— `if (svc && typeof svc.describe === "function" && typeof svc.update === "function")`。0.1.5 / 0.1.6 的 settings **同时**具备 `register()` 与新三件套 `configure` / `describe` / `update`，但那一代还没把 loader 行的 Config 注册成 settings 命名空间，于是误走新分支：`describe()` 看不到本插件（读恒空）、`update()` 抛 `settings namespace "remote-ssh" is not registered`（写必失败）——「导入」退化成纯 UI 动作。这是 issue #16 的镜像：那边是 0.1.7 拿掉了 `register`，这边是 0.1.5 还没开始用 entry 命名空间。
+
+**修法**：新增 `settingsApiMode(svc, entryId)` 三态判定（`new` / `legacy` / `config`）。两套接口都在时**只有 `describe({ redactSecrets: false })` 真能看到本插件命名空间才走新路径**，否则走 `register(ns, schema)` 旧路径（读写落 `settings.yaml` 的 section，升级前存下的旧数据可直接读到）；探测抛错按 `legacy` 处理，绝不静默当新版。另外给 `register()` 加了 try/catch：万一它抛（命名空间已被别处注册 / 服务实现又变了），退到只读 config 并打一行 warn，插件照常挂载（连接列表能看、改不动），而不是让 `apply()` 抛错、整个插件不加载。
+
+**验证**：新增 `tests/settings-api-mode.test.mjs`（25 条）：三态与边界（两套都有但读不到 / 读得到 / 只看到别的 ns / 探测抛错 / 接口不完整 / svc 缺失）、0.1.5 现场语义（`update()` 抛 `not registered` 时仍判 legacy）、命名空间比对用 **entry id**、探测带 `redactSecrets: false`、接线断言，以及**变异负向控制**（把判定改回「两套都算新版」→ A3 / C8 必须变红）。全量 38 文件 / 2022 断言 / 0 失败。
+
 ## [2.4.40] — 2026-10-25
 
 ### 修：密码认证从未真正可用（所有平台）——`redactSecrets: true` 在运行时抹掉了口令（PR #33，贡献者 LPLS1zhang）
