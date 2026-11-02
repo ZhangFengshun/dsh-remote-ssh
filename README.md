@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.41
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.42
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -224,7 +224,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | dsh-better-sidebar | 0.19.x | ⚠️ 插件侧已适配 6 端点（含 `fs.rename`/`fs.remove`）；但 0.19.0/0.19.1 自身在 DSH Desktop 上主机半边无法加载，需等上游修复（见[安装](#安装)的警告） |
 | dsh-better-sidebar | **0.20 – 0.24.x**（实测 0.24.1） | ✅ **2.4.18 起适配 9 端点**：0.23+ 的文件树改为**批量 `fs.trees`**（一次请求列举「可见集」，≤64 条）+ 新增 `fs.mkdir`，0.24 的「打开方式」走 `open.external`。此前只注册 `fs.tree` → 新版的列举**绕过拦截**落到 better-sidebar 自己的本地实现，远程项目里看到的就成了**本地镜像目录**；「打开方式」也只会打开本地镜像（见[故障排查](#故障排查)） |
 | dsh-better-sidebar | **0.25.0 – 0.26.1** | ✅ **2.4.28 – 2.4.31 起适配**：git 面板的全部端点（`git.*` 18 项：status / diff / log / stage / commit / checkout / blame / worktrees / pull / push …）改由 exact 路由接管并**在远端执行**（此前未接管 → 远程项目里 git 面板显示的是**本地镜像**那份仓库）；0.25.0 的 `fs.createFile`、0.26.1 的 `fs.readPage`（大文件分页预览）逐个对齐上游语义 |
-| dsh-better-sidebar | **0.28.0**（实测，2026-10-17） | ✅ **2.4.32 起适配**：0.28.0 的派发表从 42 → 43 个方法，唯一新增的 **`git.graph`（提交图分页）** 已接管（含 sha256 快照游标、`graph-stale` 409 / `graph-limit` 400）；已接管的 **`git.status`** 补齐 0.28.0 的新形状（`upstream`/`ahead`/`behind`/`detached`/`operation` + 条目级 `staged`/`unstaged` 行数 + 2000 条截断），远端一条脚本一次 SSH 往返取齐。`fs.*` 10 项、`/sidebar/file`、`open.external` 与 0.26.1 **逐字节相同**，无需改动 |
+| dsh-better-sidebar | **0.28.0 – 0.28.2**（实测 0.28.2） | ✅ **2.4.32 / 2.4.42 起适配**：0.28.0 的派发表从 42 → 43 个方法，唯一新增的 **`git.graph`（提交图分页）** 已接管（含 sha256 快照游标、`graph-stale` 409 / `graph-limit` 400）；**0.28.2 又新增 `git.history`**（提交图分支数超上限时的分页历史兜底）→ **2.4.42 起接管**（前后各取一次「全量 refs + HEAD + shallow」快照算指纹，远端仍是每页 2 次 SSH 往返）。不接管它时，远程工作区里客户端翻历史会读**本地镜像**那份仓库（upstream-drift 2026-11-02 报红的原因）。已接管的 **`git.status`** 补齐 0.28.0 的新形状（`upstream`/`ahead`/`behind`/`detached`/`operation` + 条目级 `staged`/`unstaged` 行数 + 2000 条截断），远端一条脚本一次 SSH 往返取齐。`fs.*` 10 项、`/sidebar/file`、`open.external` 与 0.26.1 **逐字节相同**，无需改动 |
 | dsh-better-sidebar | **未安装 / 加载失败** | ✅ **2.4.18 起可正常启动**（不再阻塞 `web boot`，见[安装](#安装)）：设置页「远程连接」、模型工具、远程终端、`@` 补全照常；⚠️ 「文件」页签的远程读写与编辑器页签不可用（`/sidebar/api/fs.*` 属于 better-sidebar；内核原生侧边栏走自己的 `/api/*`）。宿主会打一条 `patch: entry "better-sidebar" not found` 的 warn，属正常 |
 | 远程主机 sshd | 标准 OpenSSH（Linux / 超算 / Windows） | ✅ 密钥认证；✅ 密码认证（Windows 用系统 OpenSSH 原生 `SSH_ASKPASS`，零依赖；POSIX 需本机 `sshpass`） |
 

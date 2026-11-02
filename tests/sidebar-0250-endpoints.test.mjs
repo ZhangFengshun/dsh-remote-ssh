@@ -486,8 +486,12 @@ const gitMethods = (() => {
 })()
 const NEED_FS = ['fs.createFile']
 const NEED_GIT = ['blame', 'diff-head', 'worktrees', 'pull', 'push']
+// 0.28.2 新增的 git.history（提交图超分支上限时的分页历史兜底）—— upstream-drift 2026-11-02 报红的那一项。
+// 远程工作区不接管它，客户端翻页时会拿本地镜像里的仓库列历史（与本文件 C 段防的是同一类静默失效）。
+const NEED_GIT_0282 = ['history']
 for (const m of NEED_FS) check(fsRouteArray.includes(m), 'C1 fs 路由注册了 0.25.0 新端点 ' + m)
 for (const m of NEED_GIT) check(gitMethods.includes(m), 'C2 GIT_METHODS 注册了 0.25.0 新端点 git.' + m)
+for (const m of NEED_GIT_0282) check(gitMethods.includes(m), 'C2b GIT_METHODS 注册了 0.28.2 新端点 git.' + m)
 check(!gitMethods.includes('models') && !gitMethods.includes('suggest-message') && !gitMethods.includes('commit-model'),
   'C3 模型类端点（models / suggest-message / commit-model）**不**注册（它们不碰仓库路径，交给上游才对）')
 check(!/function createWorkspaceFile\(/.test(src) && !/function assertCreatableFileName\(/.test(src) &&

@@ -157,10 +157,11 @@ PR 工作流对首次贡献者默认 `action_required`，由维护者放行后 *
 
 探针写法注记（踩过一次）：`/remote-ssh/api/*` 必须带 `x-requested-with` 头；其 HTTP 返回是 `{"ok":true,"value":{…}}` **信封**，
 直接读 `body.workspaces` 会得到 undefined 并误判成"0 个工作区"（`fs.*` 同样是 `value` 信封）。
-### 端点接管清单（截至 2.4.36）
+### 端点接管清单（截至 2.4.42）
 
 - **2.4.37 – 2.4.39 期间无新增/变更路由**：三版只改内部逻辑与客户端渲染（角标认行方式、id 漂移自愈、壳层删区联动）；2.4.39 的联动挂在 `workspaceRegistry.delete` 服务方法上，不是 HTTP 端点，`getPrefs` 只是多回一个 `deleteSync` 字段。
-- 本插件以 `kind: "exact"` 接管 **31** 条路由（`/sidebar/api/fs.*` + `/sidebar/file` + `git.*`）：2.4.28 接 better-sidebar 0.25.0 的 6 个，2.4.31 接 0.26.1 的 `fs.readPage`。**2.4.35 / 2.4.36 无变化**（#29 的读影子层是**进程内**包装 `ctx.fs`，不是 HTTP 路由；2.4.34 的 #28 只给已有端点 `updateWorkspaceGuards` / `createRemoteWorkspace` / `getPrefs` / `savePrefs` 加了字段并复用 `syncDown` / `syncUp`，同样没有新增路由）。
+- **2.4.42 接 better-sidebar 0.28.2 的 `git.history`**（提交图分支数超上限时的分页历史兜底）：上游 0.28.2 在 `git.graph` 之外又加了一个碰仓库的端点，未接管时远程工作区会拿本地镜像列历史 —— `upstream-drift` 2026-11-02 报红报的就是这一项（`sidebar-0250` 的 C9 对拍 `缺: git.history`）。实现与 `git.graph` 同形但指纹口径不同：**全量 `for-each-ref`（不限 heads/remotes）+ HEAD + shallow 边界文件**的 sha256，`graph-stale` 409 / `graph-limit` 400 复用同一组错误码。远端那段 sh 有独立验证：`node scripts/verify-remote-history-script.mjs`（WSL 真 sh + 真 git，25 条；与 `verify-remote-status-script.mjs` 同套路 —— 假 SSH 出口只能验数据流，验不了 POSIX 正确性）。
+- 本插件以 `kind: "exact"` 接管 **32** 条路由（`/sidebar/api/fs.*` + `/sidebar/file` + `git.*`）：2.4.28 接 better-sidebar 0.25.0 的 6 个，2.4.31 接 0.26.1 的 `fs.readPage`，2.4.32 接 0.28.0 的 `git.graph`，2.4.42 接 0.28.2 的 `git.history`。**2.4.35 / 2.4.36 无变化**（#29 的读影子层是**进程内**包装 `ctx.fs`，不是 HTTP 路由；2.4.34 的 #28 只给已有端点 `updateWorkspaceGuards` / `createRemoteWorkspace` / `getPrefs` / `savePrefs` 加了字段并复用 `syncDown` / `syncUp`，同样没有新增路由）。
 - `fs.readPage`：5 MiB 以上文件的只读分页预览，**128 KiB/页、页尾回退到最后一个换行**、整页无换行时原样返回，返回 `{kind,text,offset,nextOffset,eof,size,mtimeMs,encoding}`（字段名取自上游，消费方是上游预览面板，不能自创）。远端分支一次 SSH 往返取 `size/mtime` + 该页字节（`tail -c +N | head -c 131072 | base64 -w0`），**回退与解码在本地做**；失败映射成上游同款 `400 fs-error`。`path` 必填。
 - 上游升级后先跑 `tests/sidebar-0250-endpoints.test.mjs`：它会列出「本插件未接管的上游端点」并对拍文件名校验等纯函数语义。上游重构（如 0.26.1 把单段名检查拆成 `assertSingleSegmentName`）会让上游沙箱抽取失败 —— 此时补抽对应函数即可，**不要**把对拍降级成「跳过」或放宽比较。
 

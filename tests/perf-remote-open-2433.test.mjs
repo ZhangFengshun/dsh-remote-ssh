@@ -212,7 +212,7 @@ console.log('\nC. git 专用池化通道：git.* 走独立会话，不再与文�
   check(sb.rec.remote[0][6] === 'git', 'C1 远端 git.status 的 runPooled 第 7 参 = "git"（独立会话键）')
   const two = src.split('runPooled(remote.profile, script, undefined, 8 * 1024 * 1024, undefined, undefined, "git")').length - 1
   const generic = src.split('runPooled(profile, "git -C " + shellQuotePath(remoteDir) + " --no-pager -c color.ui=false " + quoted, undefined, 8 * 1024 * 1024, undefined, undefined, "git")').length - 1
-  check(two === 2, 'C2 status 与 graph 两处远端调用都已切到 "git" 通道（源码恰好 2 处）')
+  check(two === 3, 'C2 status / graph / history 三处远端调用都已切到 "git" 通道（源码恰好 3 处）')
   check(generic === 1, 'C3 通用 git 远端 runner（diff/log/branch…共用）也已切到 "git" 通道')
   const fileChannel = src.split('await runPooled(').length - 1
   check(fileChannel >= 20 && src.indexOf('runPooled(p, args.command') > 0, 'C4 文件/工具通道的 runPooled 调用不受影响（仍走默认会话键）')

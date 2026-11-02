@@ -2,6 +2,23 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.42] — 2026-11-02
+
+### 修：better-sidebar 0.28.2 新增的 `git.history` 未接管 —— 远程工作区翻历史读的是本地镜像（upstream-drift 报红）
+
+**现象**：`upstream-drift` 流水线（每周把 `dsh-better-sidebar@latest` 装进假 profile 跑全量对拍）在 2026-11-02 报红：`sidebar-0250-endpoints.test.mjs` 的 C9 对拍断言 `缺: git.history`（该文件 104 通过 / 1 失败；全量 38 文件 / 1985 通过 / 1 失败）。本机装 0.28.2 后逐条复现一致。
+
+**根因**：上游 0.28.2（2026-10-27 发布）新增端点 `git.history` —— 提交图在分支数超过上限（`graph-limit`）时，客户端会**回落到它继续翻页**。本插件只接管到 0.28.0 的 `git.graph`，`git.history` 未注册 → 请求回落到上游实现，而远程工作区里上游用的是会话 cwd（本地镜像目录）：翻出来的历史来自镜像仓库（通常为空或滞后），与 2.4.18 / 2.4.28 / 2.4.32 同源的静默失效。
+
+**修法**：按上游口径接管（`lib/index.js` 新增 `gitHistoryPage` + `historyLocalIo` / `historyRemoteIo`，`GIT_METHODS` 追加 `history`）：
+- 入参 `{ count = 50, cursor? }`：`count` 安全整数且 ≥1、内部上限 200；`cursor` 为 `base64url(JSON{version:1,fingerprint,offset})`，`offset` 1..10000。
+- 取数：`log --branches --remotes HEAD --topo-order --no-decorate --no-show-signature --encoding=UTF-8 --max-count=limit+1 --skip=offset --format=… --`。
+- 前后各取一次「全量 refs（`for-each-ref` **不限** heads/remotes）+ HEAD + shallow 边界文件」快照算 sha256 指纹（与 `git.graph` 的指纹刻意分开算）；期间历史变了 → `graph-stale`(409)；refs > 100000 / shallow > 1 MiB / 翻页越过 10000 → `graph-limit`(400)。
+- 远端仍是**一次 SSH 往返**（快照 + log + 快照用标记分段），`root` 回映射成本地镜像路径，远端目录不在时回 `isRepo:false` 而不是 500。
+- 条目形状与 `git.graph` 一致，但 `refs` 恒为 `[]`（上游 history 不做引用装饰）。
+
+**验证**：新增 `tests/sidebar-0282-history.test.mjs`（73 条：A 本地契约/参数/指纹/游标/8 类错误码，B 远端脚本标记与每页 2 次往返，C 真实临时仓库的分页闭环 + 真过期检测 + 多分支，D 接线断言与上游 handler 键集合对拍）；`tests/sidebar-0250-endpoints.test.mjs` 增加 C2b（`GIT_METHODS` 含 `history`）。全量 39 文件 / 2096 断言 / 0 失败（`tests/perf-remote-open-2433.test.mjs` 的 C2 也已从「2 处 git 通道」更新为「3 处」）。另加 `scripts/verify-remote-history-script.mjs`（25 条，WSL 真 sh + 真 git）：直接跑 `historyRemoteIo` 生成的那段脚本，覆盖标记分段、`--skip` 真分页、真过期、NOREPO、**浅克隆的 shallow 边界文件（`case`/`wc -c`/`base64` 三段）**、多分支与中文 `%B` —— 假 SSH 出口看不出的 POSIX 问题只有这里能抓到（25 通过 / 0 失败）。
+
 ## [2.4.41] — 2026-10-27
 
 ### 修：DSH 0.1.5 / 0.1.6 线上「连接列表恒为空、导入与保存都无效」（issue #34，举报人 EmptyVessel-000）
