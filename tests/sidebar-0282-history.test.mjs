@@ -515,7 +515,20 @@ function GIT_METHODS_REGISTERED() {
   return /GIT_METHODS\.forEach\(function \(m\) \{[\s\S]{0,200}?path: "\/sidebar\/api\/git\." \+ m/.test(src)
 }
 
-// 与**实际安装的** better-sidebar 对拍（MAINTENANCE 硬规则的自动化）
+// 与**实际安装的** better-sidebar 对拍（MAINTENANCE 硬规则的自动化）。
+// 关键口径：判据是「上游有而本插件没接管」，**不是**「本插件必须接管 history」——
+// tests.yml 钉的版本可能比 upstream-drift 的 @latest 旧（2026-11-02 首跑就是这么红的：
+// 钉 0.26.1 没有 git.history，硬断言「上游确实有 history」就把流水线判死）。
+const MODEL_ONLY = ['git.models', 'git.commit-model', 'git.suggest-message']
+function upstreamParity(upSrcText) {
+  const upKeys = [...new Set([...String(upSrcText).matchAll(/"(fs|git)\.[a-zA-Z-]+"/g)].map((x) => x[0].slice(1, -1)))]
+  const m = /const GIT_METHODS = \[([^\]]+)\]/.exec(src)
+  const methods = m ? [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]) : []
+  const upGit = upKeys.filter((k) => k.startsWith('git.'))
+  const needTakeover = upGit.filter((k) => MODEL_ONLY.indexOf(k) < 0)
+  return { upKeys, upGit, missing: needTakeover.filter((k) => methods.indexOf(k.slice(4)) < 0) }
+}
+
 const installed = (() => {
   const base = join(homedir(), '.dsh', 'profiles')
   if (!existsSync(base)) return null
@@ -530,15 +543,25 @@ const installed = (() => {
 if (!installed) {
   console.log('  · SKIP D5-D6：本机没有安装 dsh-better-sidebar，跳过上游对拍（不算失败）')
 } else {
-  const upKeys = [...new Set([...installed.src.matchAll(/"(fs|git)\.[a-zA-Z-]+"/g)].map((x) => x[0].slice(1, -1)))]
-  const m = /const GIT_METHODS = \[([^\]]+)\]/.exec(src)
-  const methods = m ? [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]) : []
-  const upGit = upKeys.filter((k) => k.startsWith('git.'))
-  const needTakeover = upGit.filter((k) => ['git.models', 'git.commit-model', 'git.suggest-message'].indexOf(k) < 0)
-  const missing = needTakeover.filter((k) => methods.indexOf(k.slice(4)) < 0)
-  check(upKeys.indexOf('git.history') >= 0, 'D5 上游 better-sidebar@' + installed.version + ' 确实有 git.history（漂移信号成立）')
-  check(missing.length === 0, 'D6 上游全部与仓库相关的 git.* 端点都已接管（缺: ' + (missing.join(', ') || '无') + '）')
-  console.log('  · 对拍快照：上游 git.* ' + upGit.length + ' 个，其中模型类 3 个不接管')
+  const p = upstreamParity(installed.src)
+  if (p.upKeys.indexOf('git.history') >= 0) {
+    check(p.missing.length === 0, 'D5 better-sidebar@' + installed.version + ' 有 git.history → 已接管（缺: ' + (p.missing.join(', ') || '无') + '）')
+  } else {
+    console.log('  · SKIP D5：钉住的 better-sidebar@' + installed.version + ' 还没有 git.history（上游漂移由 upstream-drift 的 @latest 负责盯）')
+  }
+  check(p.missing.length === 0, 'D6 上游全部与仓库相关的 git.* 端点都已接管（缺: ' + (p.missing.join(', ') || '无') + '）')
+  console.log('  · 对拍快照：上游 git.* ' + p.upGit.length + ' 个，其中模型类 3 个不接管')
+}
+
+// 对拍逻辑自身的两向对照（不依赖本机装的是哪一版）：
+//   D7 旧上游（只有 graph、没有 history）→ 不要求接管 history（否则钉旧版的 CI 会误红）
+//   D8 上游多出一个未知端点 → 必须报缺（证明 D5/D6 不是"永远绿"）
+{
+  const oldUpstream = 'const a = "fs.tree"; const b = "git.status"; const c = "git.graph"; const d = "git.pull";'
+  check(upstreamParity(oldUpstream).missing.length === 0, 'D7 旧上游（无 git.history）→ 不要求接管 history（CI 钉旧版不会误红）')
+  const futureUpstream = 'const a = "git.graph"; const b = "git.history"; const c = "git.reflog";'
+  check(JSON.stringify(upstreamParity(futureUpstream).missing) === JSON.stringify(['git.reflog']),
+    'D8 上游多出未知端点 git.reflog → 精确报缺（对拍有牙）')
 }
 
 console.log('\n结果: ' + pass + ' 通过, ' + fail + ' 失败')

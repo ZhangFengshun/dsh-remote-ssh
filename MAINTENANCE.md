@@ -7,13 +7,45 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本地版本 / npm latest / GitHub main | **2.4.41**（2026-10-27 发布，内容：**修 DSH 0.1.5 / 0.1.6 线上的 settings 代际误判（issue #34，报告者 EmptyVessel-000）** —— 判据此前只看 `svc.describe` / `svc.update` 存不存在，而这两代 **`register()` 与新三件套同时在**、却还没把 loader 行的 Config 注册成 settings 命名空间，于是误走 0.1.7+ 新分支：`describe()` 看不到本插件（读恒空）、`update()` 抛 `settings namespace "remote-ssh" is not registered`（写必失败），表现为「连接列表永远为空、导入与保存都没反应」。修法：新增 `settingsApiMode(svc, entryId)` 三态判定（`new` / `legacy` / `config`），两套接口都在时**只有 `describe({redactSecrets:false})` 真能看到本插件命名空间才走新路径**；探测抛错按 legacy 处理；`register()` 抛错退只读 config + warn，插件照常挂载。前序：2.4.40 修密码认证从未可用（PR #33），2.4.39 修 issue #32，2.4.38 修重启丢原生注册，2.4.37 修 issue #31）：npm `dist-tags.latest`、tag `v2.4.41`、GitHub Release（Latest）三者一致，commit `e77dc19`（2.4.40 = `0ebfb04` 文档 / `8db3e6b` 发布，2.4.39 = `c37a9b5`）。npm tarball 2.4.41 shasum `3ed83a0870bd207cdc660f07e318b72d08f7528f`（8 个文件 / 297.4 kB / 解开 853,364 B）；`lib/index.js` 仓库 = npm = **桌面 profile 安装侧** 同为 SHA256 `5D338B4E60BF69156F5FBFD5E3D9FA4AA88FDE1FCD2544F83161C2E638E53EE9`，`lib/client.js` 同为 `CE1770869AD5AFC9DD53A9F08F986F4742CBAE92B808C644D648AC1FF2289363`。桌面 profile 为 `pnpm add` 正装（依赖声明 2.4.41），启动等价校验（`--frozen-lockfile --config.minimumReleaseAge=1440`）通过 |
+| 本地版本 / npm latest / GitHub main | **2.4.42**（2026-11-02 发布，内容：**接管 better-sidebar 0.28.2 新增的 `git.history`** —— 上游在 `git.graph` 之外又加了一个碰仓库的端点（提交图分支数超上限时的分页历史兜底），未接管时远程工作区里客户端翻历史读的是**本地镜像**仓库；`upstream-drift` 2026-11-02 的定时跑（run 41430536595）报红报的就是它（`缺: git.history`）。修法：`GIT_METHODS` 追加 `history` + `gitHistoryPage`（本地/远端各一套 io），游标与错误码逐条对齐上游（`graph-stale` 409 / `graph-limit` 400），指纹口径改成「全量 `for-each-ref` + HEAD + shallow 边界文件」的 sha256，远端仍是每页 2 次 SSH 往返。前序：2.4.41 修 DSH 0.1.5/0.1.6 settings 代际误判（issue #34）、2.4.40 修密码认证（PR #33））：npm `dist-tags.latest`、tag `v2.4.42`、GitHub Release（Latest）三者一致，commit `26ec265`（2.4.41 = `e77dc19` 发布 / `68e4b95` 文档）。npm tarball 2.4.42 shasum `eae88d3ea9d9a1ee48c2b3cc0b4d06cb26ad980d`（8 个文件 / 301.2 kB / 解开 870,275 B）；仓库 `lib/index.js` SHA256 `7E9695677C42E55A0E3C3A01890472225EF652CB7BBDA04069B14B4A82E42B58`，客户端未改动（`lib/client.js` 与 2.4.41 相同 `CE1770869AD5AFC9DD53A9F08F986F4742CBAE92B808C644D648AC1FF2289363`）。**桌面 profile 仍是 `pnpm add` 的 2.4.41（未升级未重启）** —— 真机路径验证见本版实据的「未做」 |
 | 仓库 | https://github.com/ZhangFengshun/dsh-remote-ssh（HTTPS，分支 main） |
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
 | 发布可见性 | package.json `publishConfig.access = "public"` |
-| GitHub Release | **v2.4.41 = Latest**。（2026-10-27 核对）有 tag 的 **39 个版本全部有 Release**（含 v2.4.35 – v2.4.41）。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向 `3e65aa0`，产物 blob 与 npm 上 2.4.18 完全相同。npm 上另有 50 个更早版本从未打过 tag —— 不打算批量补（噪音大于价值），要补按 §3 的 `# 0c.` 走 |
+| GitHub Release | **v2.4.42 = Latest**。（2026-11-02 核对）有 tag 的 **40 个版本全部有 Release**（含 v2.4.35 – v2.4.42）。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向 `3e65aa0`，产物 blob 与 npm 上 2.4.18 完全相同。npm 上另有 50 个更早版本从未打过 tag —— 不打算批量补（噪音大于价值），要补按 §3 的 `# 0c.` 走 |
 | 文档（issue #21） | `~/.ssh/config` 的继承语义已按**代码**逐条写进两份 README 的故障排查表：导入 = 把 Host 块抄进连接配置；连接时以 profile 为准（总是 `-p <端口>` + `user@host`），只有 `keyPath` / `proxyJump` 留空才用 config 的值；导入侧只解析 `Host` 块（`Include` 递归）、含 `*`/`?` 的名字跳过、`Match` 块不解析 |
+
+### 2.4.42 发布实据（2026-11-02，upstream-drift 报红）
+
+**现象**：`upstream-drift`（每周一用 `dsh-better-sidebar@latest` 跑全量对拍）2026-11-02 的定时跑（run `41430536595`，main `68e4b95`）报红：
+`sidebar-0250-endpoints.test.mjs` 的 C9 断言 `缺: git.history`（该文件 104 通过 / 1 失败；全量 38 文件 / 1985 通过 / 1 失败）。
+本机装上 0.28.2 后逐条复现一致 —— 这正是该流水线的设计目的：**它红了就是上游发了新端点**。
+
+**根因**：上游 **0.28.2**（2026-10-27 发布）新增端点 `git.history` —— 提交图分支数超过上限（`graph-limit`）时，
+客户端会**回落到它继续翻页**。本插件此前只接管到 0.28.0 的 `git.graph`，该端点未注册 → 请求落到上游实现，
+而远程工作区里上游用的是会话 cwd（**本地镜像**）目录：翻出来的历史来自镜像仓库（通常为空或滞后）。
+与 2.4.18 / 2.4.28 / 2.4.32 同源的静默失效：不报错，只是结果不对。
+
+**修法与验证**：
+- `lib/index.js`：`GIT_METHODS` 追加 `history`、`interceptGitHandler` 加 `case "history"`、新增 `gitHistoryPage`
+  + `historyLocalIo` / `historyRemoteIo`（远端一次 SSH 往返取「快照 + log + 快照」，用 `@@DSH_GH@@` 标记分段）。
+- 口径逐条对齐上游：`count` 安全整数且 ≥1（内部上限 200）；游标 `base64url(JSON{version:1,fingerprint,offset})`，offset 1..10000；
+  `log --branches --remotes HEAD --topo-order --no-decorate --no-show-signature --encoding=UTF-8 --max-count=limit+1 --skip=offset --format=%H%x00…%B%x00 --`；
+  **指纹与 `git.graph` 分开算**（全量 `for-each-ref` 不限 heads/remotes + HEAD + shallow 边界文件的 sha256）；
+  `graph-stale` 409 / `graph-limit` 400；条目 `refs` 恒为 `[]`（上游 history 不做引用装饰）。
+- 本地全量：**39 文件 / 2098 断言 / 0 失败**。新增 `tests/sidebar-0282-history.test.mjs`（75 条，A 契约/参数/指纹/游标/8 类错误码、
+  B 远端脚本标记与每页 2 次往返、C 真实临时仓库分页闭环 + 真过期、D 接线与上游键集合对拍 + 两向对照）；
+  另加 `scripts/verify-remote-history-script.mjs`（25 条，WSL 真 sh + 真 git，覆盖标记分段、`--skip` 真分页、NOREPO、
+  **浅克隆的 shallow 边界文件**、多分支与中文 `%B`）。
+- CI：发布提交 `26ec265` 的 `upstream-drift` **全绿**（run `41480731429`：39 文件 / 2060 通过 / 0 失败，unicode-names 整文件跳过）。
+  `tests.yml` 首跑红过一次（`2059 通过 / 1 失败`），**原因不在实现**：`tests.yml` 钉的对拍版本是 0.26.1（没有 `git.history`），
+  而新测试把「上游确实有 history」写成了硬断言。已改为「**上游有而本插件没接管**才判红」（钉旧版打印 SKIP 而不是失败）+
+  两向对照 D7/D8（旧上游不要求接管 / 上游多出未知端点必须精确报缺）。
+  `tests.yml` 的钉版 0.26.1 → 0.28.2 **暂缓**：本机 gh token 没有 `workflow` scope，改 workflow 文件会被 GitHub 拒绝
+  （`refusing to allow an OAuth App to create or update workflow`）；判据改后钉旧版不会误红，要升先 `gh auth refresh -s workflow`。
+
+**未做（诚实记录）**：① 本机桌面 profile **仍是 2.4.41**（未升级、未重启），所以「远程工作区里点开提交图、翻到第二页」的真机验证还没做；
+② 没有真实远程仓库做端到端（远端分支由 faked SSH 与 WSL 真 sh 双覆盖，但不等于真机）。
 
 ### 2.4.41 发布实据（2026-10-27，issue #34）
 
@@ -258,7 +290,8 @@ cd F:\MyAIProject\RemoteSSH\dsh-remote-ssh   # 2026-10-17 从桌面 temp\ChatGPT
 #      FAIL / CRASH → 红；而**整文件跳过（0 断言）单列为 SKIP 并打印原因** —— 只看一个绿勾会被骗，
 #      例如 CI 上没有 WSL：unicode-names 整文件跳过（31 条）+ wrapper-terminal 少 5 条 → 1433。
 # 0b. push 之后 GitHub Actions 自动再跑一遍（已上线，2026-10-16 起为绿）：
-#    · workflows/tests.yml —— windows-latest + Node 22 + 钉版上游 0.26.1 + 运行时依赖 yaml/schemastery；
+#    · workflows/tests.yml —— windows-latest + Node 22 + 钉版上游 0.26.1（升 0.28.2 需 gh token 有 workflow scope）
+#      + 运行时依赖 yaml/schemastery；
 #    · workflows/upstream-drift.yml —— 每周一 03:00 UTC 用 @latest 跑：**它红了就是上游发了新端点**，
 #      按「升级 better-sidebar 后必做对拍」接管，别改断言让它变绿。
 #    两个坑（都踩过，已写进工作流注释）：

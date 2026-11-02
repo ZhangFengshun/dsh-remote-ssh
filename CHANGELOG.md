@@ -17,7 +17,9 @@
 - 远端仍是**一次 SSH 往返**（快照 + log + 快照用标记分段），`root` 回映射成本地镜像路径，远端目录不在时回 `isRepo:false` 而不是 500。
 - 条目形状与 `git.graph` 一致，但 `refs` 恒为 `[]`（上游 history 不做引用装饰）。
 
-**验证**：新增 `tests/sidebar-0282-history.test.mjs`（73 条：A 本地契约/参数/指纹/游标/8 类错误码，B 远端脚本标记与每页 2 次往返，C 真实临时仓库的分页闭环 + 真过期检测 + 多分支，D 接线断言与上游 handler 键集合对拍）；`tests/sidebar-0250-endpoints.test.mjs` 增加 C2b（`GIT_METHODS` 含 `history`）。全量 39 文件 / 2096 断言 / 0 失败（`tests/perf-remote-open-2433.test.mjs` 的 C2 也已从「2 处 git 通道」更新为「3 处」）。另加 `scripts/verify-remote-history-script.mjs`（25 条，WSL 真 sh + 真 git）：直接跑 `historyRemoteIo` 生成的那段脚本，覆盖标记分段、`--skip` 真分页、真过期、NOREPO、**浅克隆的 shallow 边界文件（`case`/`wc -c`/`base64` 三段）**、多分支与中文 `%B` —— 假 SSH 出口看不出的 POSIX 问题只有这里能抓到（25 通过 / 0 失败）。
+**验证**：新增 `tests/sidebar-0282-history.test.mjs`（75 条：A 本地契约/参数/指纹/游标/8 类错误码，B 远端脚本标记与每页 2 次往返，C 真实临时仓库的分页闭环 + 真过期检测 + 多分支，D 接线断言与上游 handler 键集合对拍）；`tests/sidebar-0250-endpoints.test.mjs` 增加 C2b（`GIT_METHODS` 含 `history`）。全量 39 文件 / 2098 断言 / 0 失败（`tests/perf-remote-open-2433.test.mjs` 的 C2 也已从「2 处 git 通道」更新为「3 处」）。另加 `scripts/verify-remote-history-script.mjs`（25 条，WSL 真 sh + 真 git）：直接跑 `historyRemoteIo` 生成的那段脚本，覆盖标记分段、`--skip` 真分页、真过期、NOREPO、**浅克隆的 shallow 边界文件（`case`/`wc -c`/`base64` 三段）**、多分支与中文 `%B` —— 假 SSH 出口看不出的 POSIX 问题只有这里能抓到（25 通过 / 0 失败）。
+
+**顺带修掉一处流水线自身的脆弱**：`tests.yml` 对拍的钉版是 0.26.1（没有 `git.history`），而新测试里「上游确实有 `git.history`」是硬断言 —— 2.4.42 发布提交的首跑因此红了（2059 通过 / 1 失败，`upstream-drift` 同一提交却全绿）。改为**「上游有而本插件没接管」才判红**（钉旧版 → 打印 SKIP 而不是失败），并补两向对照 D7/D8（旧上游不要求接管、上游多出未知端点必须精确报缺）。`tests.yml` 的钉版 0.26.1 → 0.28.2 暂缓：本机 gh token 没有 `workflow` scope，改 workflow 文件会被 GitHub 拒绝（`refusing to allow an OAuth App to create or update workflow`）；钉旧版现在也不会误红（判据是「上游有而本插件没接管」），要升只需先 `gh auth refresh -s workflow`。
 
 ## [2.4.41] — 2026-10-27
 
