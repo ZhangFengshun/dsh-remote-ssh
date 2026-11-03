@@ -403,10 +403,12 @@ console.log('F · 静态防线（源码级不变式）')
   check(/整树/.test(desc) && /paths/.test(desc), '工具描述写清"整树"语义与 paths 收窄手段')
   check(/不要用 sync/.test(desc), '工具描述明确"读远端文件不要用 sync"')
 
-  const entryCount = (src.match(/syncOptsFrom\(ws, (?:a|args)\)\)/g) || []).length
+  // 2.4.43 起工具入口的 opts 后面还跟一个 signal（issue #35），所以尾巴不再固定是 `))`
+  const entryCount = (src.match(/syncOptsFrom\(ws, (?:a|args)\)(?:, sig)?\)/g) || []).length
   check(entryCount === 4, '四处入口（2 工具 + 2 HTTP）都走 syncOptsFrom（实际 ' + entryCount + '）')
-  const downCount = (src.match(/remoteSyncDown\(subprocess, runPooled, /g) || []).length
-  check(downCount === 2, '两处 sync 入口都把 runPooled 作为体积探测 runner 传入（实际 ' + downCount + '）')
+  // 工具入口的 runner 从裸 runPooled 换成 signalRunner(sig)（同一池化执行器 + 取消信号）
+  const downCount = (src.match(/remoteSyncDown\(subprocess, (?:runPooled|signalRunner\(\w+\)), /g) || []).length
+  check(downCount === 2, '两处 sync 入口都把池化 runner（runPooled / 带信号的 signalRunner）作为体积探测 runner 传入（实际 ' + downCount + '）')
   check(!/remoteSyncDown\(subprocess, p, ws\.remotePath/.test(src), '没有任何入口还在用旧签名调用 remoteSyncDown')
 }
 

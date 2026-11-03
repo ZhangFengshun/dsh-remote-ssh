@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.42
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.43
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -226,7 +226,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | dsh-better-sidebar | **0.25.0 – 0.26.1** | ✅ **2.4.28 – 2.4.31 起适配**：git 面板的全部端点（`git.*` 18 项：status / diff / log / stage / commit / checkout / blame / worktrees / pull / push …）改由 exact 路由接管并**在远端执行**（此前未接管 → 远程项目里 git 面板显示的是**本地镜像**那份仓库）；0.25.0 的 `fs.createFile`、0.26.1 的 `fs.readPage`（大文件分页预览）逐个对齐上游语义 |
 | dsh-better-sidebar | **0.28.0 – 0.28.2**（实测 0.28.2） | ✅ **2.4.32 / 2.4.42 起适配**：0.28.0 的派发表从 42 → 43 个方法，唯一新增的 **`git.graph`（提交图分页）** 已接管（含 sha256 快照游标、`graph-stale` 409 / `graph-limit` 400）；**0.28.2 又新增 `git.history`**（提交图分支数超上限时的分页历史兜底）→ **2.4.42 起接管**（前后各取一次「全量 refs + HEAD + shallow」快照算指纹，远端仍是每页 2 次 SSH 往返）。不接管它时，远程工作区里客户端翻历史会读**本地镜像**那份仓库（upstream-drift 2026-11-02 报红的原因）。已接管的 **`git.status`** 补齐 0.28.0 的新形状（`upstream`/`ahead`/`behind`/`detached`/`operation` + 条目级 `staged`/`unstaged` 行数 + 2000 条截断），远端一条脚本一次 SSH 往返取齐。`fs.*` 10 项、`/sidebar/file`、`open.external` 与 0.26.1 **逐字节相同**，无需改动 |
 | dsh-better-sidebar | **未安装 / 加载失败** | ✅ **2.4.18 起可正常启动**（不再阻塞 `web boot`，见[安装](#安装)）：设置页「远程连接」、模型工具、远程终端、`@` 补全照常；⚠️ 「文件」页签的远程读写与编辑器页签不可用（`/sidebar/api/fs.*` 属于 better-sidebar；内核原生侧边栏走自己的 `/api/*`）。宿主会打一条 `patch: entry "better-sidebar" not found` 的 warn，属正常 |
-| 远程主机 sshd | 标准 OpenSSH（Linux / 超算 / Windows） | ✅ 密钥认证；✅ 密码认证（Windows 用系统 OpenSSH 原生 `SSH_ASKPASS`，零依赖；POSIX 需本机 `sshpass`） |
+| 远程主机 sshd | 标准 OpenSSH（Linux / 超算 / Windows） | ✅ 密钥认证；✅ 密码认证（Windows 用系统 OpenSSH 原生 `SSH_ASKPASS`，零依赖、助手自动落在纯 ASCII 目录；POSIX 需本机 `sshpass`） |
 
 插件不修改 DSH 源码、不注入 profile 依赖树，全部能力经官方 `cordis.patch.yml` + profile 机制挂载。
 
@@ -242,6 +242,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | **右键「打开方式 / 在文件管理器中显示」打开的是本地镜像目录（不是远端）** | 2.4.18 起已修复：该菜单把**客户端已知的绝对路径**直接交给本机打开器（`explorer.exe /select,<路径>` / `rundll32 url.dll,FileProtocolHandler <url>`），远程工作区里客户端只有镜像路径。现在拦截 `open.external`：远程工作区改开 `vscode://vscode-remote/ssh-remote+<别名><远端路径>`（别名取自 `~/.ssh/config`；`reveal` 打开的是该文件**所在的远端目录**），本地工作区行为不变 |
 | 远程工作区里「用 VS Code 打开」没反应 / 提示连不上 | 需要 `~/.ssh/config` 里有与连接**一致的别名**（Host 同名或 HostName 相同、且端口与用户名一致）——插件据此生成 `ssh-remote+<别名>`，VS Code 会复用该条目的 `Port`/`User`/`IdentityFile`/`ProxyJump`。没有别名且端口不是 22 时插件**回退本机行为**并在 DSH 日志里打一条 warn（避免静默失败）。另外：**不要**在 better-sidebar 的 `openWith.sshHost` 里手填主机——那条分支由客户端自行打开、路径仍是本地镜像路径，交给本插件处理才对 |
 | **`~/.ssh/config` 里的 `Host` 块会被继承吗**（issue [#21](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/21)） | 分三层：① **导入 ≠ 运行时继承** —— 设置页「从 `~/.ssh/config` 导入」是把该 Host 块的 HostName / User / Port / IdentityFile / ProxyJump **抄进连接配置**，之后再改 `~/.ssh/config` 不会自动同步（重新导入即可）。② **连接时以连接配置为准** —— 插件固定以 `user@host` 为目标、并**总是**传 `-p <端口>`（没填就是 22），而命令行参数**优先于** config，所以**端口与用户名必须填对**（导入会帮你填好）；只有 `keyPath` 与 `proxyJump` **留空**时，才会用 config 里的 `IdentityFile` / `ProxyJump`。③ **别名与其余选项** —— 把「主机」填成 Host 别名时，config 里插件**没有**显式指定的选项（`ProxyCommand`、`Compression`、`Ciphers`、`SetEnv` 等）照常由 ssh 应用，但插件自己传的 `-o`（`StrictHostKeyChecking=accept-new`、`ConnectTimeout=15`、`ServerAliveInterval=30`、`ServerAliveCountMax=3`、`ClearAllForwardings=yes`，非交互会话还有 `BatchMode=yes` / `PreferredAuthentications=publickey`）会覆盖同名项。导入侧只解析 `Host` 块（`Include` 递归跟进）、**含 `*`/`?` 的名字跳过**（所以全局 `Host *` 不会被导入 —— 但连接时 ssh 仍会应用它），`Match` 块不解析（块内指令会被算进上一个 `Host`） |
+| **「测试连接」/ 工具对密码认证报 `Permission denied`**，且诊断里出现 `ssh_askpass: posix_spawnp: No such file or directory` 或 `CreateProcessW failed error:2` | ≤ 2.4.42 的已知问题（issue [#36](https://github.com/ZhangFengshun/dsh-remote-ssh/issues/36)）：Windows 用户名含中文等非 ASCII 字符时 `%USERPROFILE%`（以及它下面的 `%TEMP%`）都不是 ASCII，而 Windows OpenSSH 用**窄字符路径**启动 askpass 助手 → 助手根本没执行，ssh 把**空口令**发给服务端（提示还会误报成「公钥认证失败 / 检查 keyPath」）。**2.4.43 起**助手改落 `C:\ProgramData\dsh-remote-ssh` → `C:\Users\Public\dsh-remote-ssh` → 用户目录，自动挑纯 ASCII 且可写的落点；也可用环境变量 `DSH_REMOTE_SSH_ASKPASS` 显式指定纯 ASCII 目录下的 `.cmd` 助手（两行内容：`@<nul set /p x="%RSSH_ASKPASS_PW%"` 与 `@echo.`）。升级后删掉旧的 `~/.dsh/remote-ssh/askpass.cmd` 再重试即可 |
 | 内置「终端」页签连不上 | 终端为 `ssh -tt` 交互式通道，**仅支持密钥认证**；密码认证的连接会回退为本地 shell 并打印一行提示（避免把本地 shell 误认为已连上远程），密码认证请改用「文件」页签与模型工具 |
 | 「测试连接」报 **`配置的私钥文件不存在或不可读：…`**（或原始信息里有 `Warning: Identity file … not accessible`） | 2.4.19 起会直接点名：连接里 `keyPath` 指向的私钥文件在本机不存在（拼错路径、换机后密钥没同步、或写了 `~` 但文件不在那儿）。改成正确路径，或**清空 `keyPath`** 改为依赖 ssh-agent / `~/.ssh/config` 里的 `IdentityFile`；注意「测试连接」以批处理模式运行，带口令的密钥无法交互输口令（先 `ssh-add`） |
 | 远端要求**扫码 / 动态口令 / 二次验证**（`keyboard-interactive`），「测试连接」仍失败 | 「测试连接」与文件、工具能力走的是**非交互公钥通道**（`BatchMode=yes` + `PreferredAuthentications=publickey`），不会弹出扫码提示 —— 这是刻意设计（批量、并发、无人值守都不能等人工扫码）。**交互式登录请用内置「终端」页签**（`ssh -tt` 交互通道，可扫码/输密码/输动态口令）；要让文件与工具能力可用，请在远端 `~/.ssh/authorized_keys` 收录本机公钥（贴出的 `Permission denied (publickey,password,keyboard-interactive)` 只说明远端**允许**这些方式，不代表本插件能用它们） |

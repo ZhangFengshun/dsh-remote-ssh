@@ -12,9 +12,10 @@
 //   E. ensureWindowsAskpass 助手幂等、无 BOM、口令元字符保真
 import { readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
 const src = readFileSync(root + '/lib/index.js', 'utf8')
@@ -66,18 +67,29 @@ const apiSettings = new Function('join', 'readFile', 'z', sandbox1Body)(
 )
 
 // ── 沙箱 2：sshArgv + ensureWindowsAskpass（依赖 sshExecutablePath / expandSshPath） ──
+const askpassScriptConst = (src.match(/const ASKPASS_SCRIPT = [\s\S]*?;\n/) || [''])[0]
 const sandbox2Body =
   'let cachedSshPath;\n' +
   grab('function sshExecutablePath') + '\n' + grab('function expandSshPath') + '\n' +
+  askpassScriptConst + '\n' +
+  grab('function isAsciiAskpassPath') + '\n' + grab('function askpassFileName') + '\n' +
+  grab('function writeAskpassAt') + '\n' +
   grab('function ensureWindowsAskpass') + '\n' + grab('function sshArgv') +
   '\nreturn { sshExecutablePath, ensureWindowsAskpass, sshArgv };'
-const apiSsh = new Function('join', 'homedir', 'mkdirSync', 'writeFileSync', 'existsSync', 'process', sandbox2Body)(
+// issue #36：askpass 现在优先落 ProgramData / Public。测试用临时目录冒充这两个环境变量，
+// 既不写真实 C:\ProgramData，也不受 CI 机器用户名影响。
+const askpassSandbox = mkdtempSync(join(tmpdir(), 'rssh-askpass-env-'))
+const sandboxEnv = { ProgramData: join(askpassSandbox, 'ProgramData'), PUBLIC: join(askpassSandbox, 'Public') }
+const fakeProcess = (env) => ({ platform: 'win32', env: env })
+const apiSsh = new Function('join', 'dirname', 'homedir', 'mkdirSync', 'writeFileSync', 'existsSync', 'process', 'createHash', sandbox2Body)(
   join,
+  dirname,
   homedir,
   mkdirSync,
   writeFileSync,
   existsSync,
-  process,
+  fakeProcess(Object.assign({}, process.env, sandboxEnv)),
+  createHash,
 )
 
 let pass = 0, fail = 0
@@ -151,21 +163,27 @@ console.log('D · fs 拦截按 profileId 路由（源码断言）')
 
 console.log('E · ensureWindowsAskpass 助手')
 {
-  // 单独实例化沙箱，homedir 指向临时目录 —— 不污染真实 ~/.dsh/remote-ssh
-  const fakeHome = mkdtempSync(join(tmpdir(), 'rssh-askpass-'))
-  const apiAsk = new Function('join', 'homedir', 'mkdirSync', 'writeFileSync', 'existsSync', 'process', sandbox2Body)(
-    join, () => fakeHome, mkdirSync, writeFileSync, existsSync, process,
+  // homedir 故意指向**含中文**的目录，复现 issue #36 的用户环境：%USERPROFILE% 非 ASCII。
+  const fakeHome = join(askpassSandbox, '中文用户')
+  mkdirSync(fakeHome, { recursive: true })
+  const apiAsk = new Function('join', 'dirname', 'homedir', 'mkdirSync', 'writeFileSync', 'existsSync', 'process', 'createHash', sandbox2Body)(
+    join, dirname, () => fakeHome, mkdirSync, writeFileSync, existsSync, fakeProcess(Object.assign({}, process.env, sandboxEnv)), createHash,
   )
-  const file = apiAsk.ensureWindowsAskpass()
-  check(existsSync(file), 'E1 助手已生成: ' + file)
-  check(file === join(fakeHome, '.dsh', 'remote-ssh', 'askpass.cmd'), 'E2 位于 <home>/.dsh/remote-ssh/（与终端 wrapper 同目录）')
+  const got = apiAsk.ensureWindowsAskpass()
+  const file = got.file
+  check(got.ascii === true, 'E1 助手落点可用（ascii:true）')
+  check(existsSync(file), 'E2 助手已生成: ' + file)
+  // issue #36：绝不能落在含中文的 %USERPROFILE% 下
+  check(!file.startsWith(fakeHome), 'E3 不落在含非 ASCII 字符的用户目录（issue #36）')
+  check(/^[\x20-\x7E]+$/.test(file), 'E4 落点路径纯 ASCII（Windows OpenSSH 用窄字符路径启动 askpass）')
+  check(file.startsWith(join(sandboxEnv.ProgramData, 'dsh-remote-ssh')), 'E5 首选 ProgramData（多用户共享的 ASCII 目录）')
   const again = apiAsk.ensureWindowsAskpass()
-  check(again === file, 'E3 幂等（重复调用返回同一路径）')
+  check(again.file === file && again.ascii === true, 'E6 幂等（重复调用返回同一路径）')
   const head = readFileSync(file).subarray(0, 3)
-  check(!(head[0] === 0xEF && head[1] === 0xBB && head[2] === 0xBF), 'E4 无 BOM（BOM 会挂掉首行命令）')
+  check(!(head[0] === 0xEF && head[1] === 0xBB && head[2] === 0xBF), 'E7 无 BOM（BOM 会挂掉首行命令）')
   const body = readFileSync(file, 'utf8')
-  check(body.includes('@<nul set /p x="%RSSH_ASKPASS_PW%"'), 'E4b 第一行 set /p 引号保护（口令元字符保真）')
-  check(/^@echo\./m.test(body), 'E4c 第二行 @echo. 补尾换行（readpass 按行读，无换行会读到空口令）')
+  check(body.includes('@<nul set /p x="%RSSH_ASKPASS_PW%"'), 'E8 第一行 set /p 引号保护（口令元字符保真）')
+  check(/^@echo\./m.test(body), 'E8b 第二行 @echo. 补尾换行（readpass 按行读，无换行会读到空口令）')
   if (process.platform === 'win32') {
     // 有的受限运行环境（沙箱 CI runner）禁止 spawnSync —— 防御性降级，不让测试 crash。
     let canSpawn = true
@@ -214,6 +232,7 @@ console.log('E · ensureWindowsAskpass 助手')
     console.log('  （非 Windows：跳过 E5/E6 真机 cmd 检查）')
   }
   try { rmSync(fakeHome, { recursive: true, force: true }) } catch (e) {}
+  try { rmSync(askpassSandbox, { recursive: true, force: true }) } catch (e) {}
 }
 
 console.log('')

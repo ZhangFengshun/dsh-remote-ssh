@@ -2,6 +2,73 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.43] — 2026-11-03
+
+**协作式取消（issue #35）：`remote_ssh_*` 工具现在真的能被「停止键」停下。**
+
+**现象**：DSH 的取消是**协作式**的 —— 注册表不与工具 promise 竞速，工具必须观察 `exec.signal` 并在自有工作停下后才返回。
+2.4.42 及以前本插件全文件 `exec.signal` 出现 **0 次**：按停止键只把 turn 标记为取消，实际仍要等远端命令自己结束。
+默认超时下最多多等 120 s / 10 分钟；而 README 推荐长任务用 `timeoutMs: 0`，一旦这么用等待就**没有上限**，
+唯一的手动兜底 `remote_ssh_kill` 本身也是一次工具调用 —— 同一 turn 卡住时按不到。报告者用 `sleep 60` 实测：连按 4 次停止键，工具仍耗 60.053 s。
+
+**根因与修法**（`lib/index.js`）：
+- `withTimeout()` 增第 5 参 `signal`：取消以 `isAbort` reject，**先 reject 再** `onTimeout`（丢弃会话）—— 顺序反了的话，
+  terminate/close 顺带 settle 的 `done` 会抢在 race 之前落地，把「取消/超时」误报成「命令自己失败了」（测试 F2/F8 就是抓这个的）；settle 时摘掉监听器
+  （`exec.signal` 的生命周期比单次调用长，监听器泄漏会让下一次 abort 误触发旧回调）。
+- `runRemote()` / `runPooled()` 增尾参 `signal`；取消走 `isAbort` 分支，**绝不回退到一次性连接** —— 否则会把刚被用户停掉的命令
+  **再执行一遍**（与 issue #5「超时不重试」同一条不变量）。丢弃会话后各给 ≤3 s 停稳窗口（`CommandSession.close()` 会立刻 reject 挂起的 exec）。
+- `toolContext()` 带出 `exec.signal`；新增 `signalRunner(signal)` 把信号绑进 runner：`ls` / `cat` / `write` / `grep` / `glob` / `sync` 经 runner 的 helper
+  无需改签名就获得取消能力，`exec` / `mkdir` / `delete` / `move` 直接透传第 8 参。
+- `runTarPipe()`（sync / push 的 tar 管道）增 `signal`：取消时两端 `terminate()`，等停稳后返回 `isAbort`，调用方保留「本地镜像未改动」的既有语义。
+- **返回值净化**：`isAbort` 是内部标记。`exec` 型工具走 `normExec()`（只挑 schema 里的字段），`sync` / `push` 走新增的 `stripAbort()`，
+  普通失败也不挂该字段 —— 否则 `additionalProperties: false` 会把「取消」判成 `returned invalid output`。
+
+**验证**：新增 `tests/cancel.test.mjs`（86 条）—— withTimeout 四种形态与监听器摘除、runRemote（一次性连接）与 runPooled（池化会话）的
+预取消 / 取消中 / **取消不回退重跑** / 超时仍不回退 / 真失败仍回退且信号透传、runTarPipe 取消、`signalRunner` 与 `toolContext` 透传、
+返回值净化（schema 合法）、
+11 个走 SSH 的工具接线，另含 3 条变异负向控制（删掉 abort 分支 / 把 ls 改回裸 runner → 断言必须变红）。
+全量 **41 文件 / 2226 断言 / 0 失败**（本机，含下面的 issue #36 回归）；`tests/sync-safety.test.mjs` 的两条静态断言同步接受 `signalRunner` 形态。
+
+**未做（诚实记录）**：GUI 里按停止键的真机 E2E 未做 —— 需要真实 profile + 运行中的宿主，而本机桌面 profile 仍是 2.4.41；
+取消行为目前由「真实函数 + 可编排假会话/假管道」的沙箱覆盖。
+
+### 修（同版本第二项）：Windows 用户名含非 ASCII 字符 → 密码认证 100% 失败（issue #36）
+
+**现象**：Windows 用户名是中文（报告者 `宜川联社`，`%USERPROFILE%` = `C:\Users\宜川联社`）时，password 认证的连接「测试连接」与所有
+`remote_ssh_*` 工具一律失败；stderr 里是 `ssh_askpass: posix_spawnp: No such file or directory` + `Permission denied (publickey,password)`，
+而界面提示却在说「公钥认证失败，请检查 keyPath」—— 方向完全带偏。
+
+**真机复现（本机 OpenSSH_for_Windows_9.5p2，与报告者同版本）**：`ssh-keygen -p` 改口令时由 OpenSSH 亲自调用 askpass，
+同一份字节相同的助手脚本、只改路径：
+
+| `SSH_ASKPASS` | 结果 |
+|---|---|
+| `…\中文目录\askpass.cmd` | 失败：`CreateProcessW failed error:2` + `ssh_askpass: posix_spawnp: No such file or directory` |
+| `…\ascii\askpass.cmd` | 成功：`Your identification has been saved with the new passphrase.`（exit 0） |
+
+**根因**：Windows OpenSSH 用**窄字符路径**启动 askpass（`CreateProcessW` / `posix_spawnp`），路径含非 ASCII 字符时助手根本不会执行 →
+ssh 把**空口令**发给服务端 → 服务端只回 Permission denied。插件此前把助手写在 `~/.dsh/remote-ssh/askpass.cmd`，中文用户名下必然命中；
+`%TEMP%` 也在 `%USERPROFILE%` 下面，同样不能当替代落点。
+
+**修法**（`lib/index.js`）：
+- `ensureWindowsAskpass()` 改为按 `ProgramData\dsh-remote-ssh` → `Public\dsh-remote-ssh` → 用户目录（旧位置，仅当整条路径 ASCII 时）回退，
+  落盘前用 `isAsciiAskpassPath()`（`/^[\x20-\x7E]+$/`）校验；文件名按 `sha256(home)` 前 12 位区分用户，
+  内容仍是不含口令的两行脚本（无 BOM / CRLF / 第二行补换行）。
+- 支持环境变量 `DSH_REMOTE_SSH_ASKPASS` 显式指定纯 ASCII 目录下的助手（覆盖内置落点；值非 ASCII 时忽略并回退）。
+- 全部落点都不可用时 `sshArgv()` **抛明确错误**（给出「设环境变量 / 改用密钥认证」两条出路），不再让 ssh 发空口令后报一个误导性的公钥失败。
+- `sshErrorHint(text, p)` 改为**按认证方式归因**，并先识别 `ssh_askpass` / `posix_spawnp` / `CreateProcessW` 证据：密码连接不再输出
+  「公钥认证失败 / 检查 keyPath」，而是点名 askpass 与非 ASCII 路径；key 连接的原有归因（私钥缺失 / authorized_keys / 用户名写法）保持不变。
+
+**验证**：新增 `tests/askpass-ascii.test.mjs`（39 条）—— 落点选择与回退（ProgramData 优先 / 不可写回退 Public / 全非 ASCII → `ascii:false` /
+环境变量覆盖 / 非 ASCII 覆盖被忽略）、助手内容（无 BOM、CRLF、两行、不含口令）、按用户分文件名、`sshArgv` 抛错文案、
+诊断归因（askpass 证据 / 密码拒绝 / key 连接三条回归）、源码接线，以及**真机 OpenSSH E2E** 三条：中文路径复现失败 → 同字节 ASCII 路径成功 →
+插件落点被真实 `ssh-keygen` 接受。`tests/password-auth.test.mjs`（29 条）同步改为在新落点上验证助手的口令保真。
+全量 **41 文件 / 2226 断言 / 0 失败**（本机）。
+
+**未做（诚实记录）**：没有中文用户名的 Windows 机器，「设置 → 远程连接 → 测试连接」的真机 GUI E2E 未做；本次用 `ssh-keygen` 走的是
+OpenSSH 内部同一条 askpass 通路（同一 `read_passphrase` → `posix_spawnp`），因此能证明「助手能被启动且口令正确回传」，
+但不能替代一次真实 sshd 密码登录。
+
 ## [2.4.42] — 2026-11-02
 
 ### 修：better-sidebar 0.28.2 新增的 `git.history` 未接管 —— 远程工作区翻历史读的是本地镜像（upstream-drift 报红）
