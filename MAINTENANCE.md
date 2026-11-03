@@ -7,13 +7,47 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本地版本 / npm latest / GitHub main | **2.4.42**（2026-11-02 发布，内容：**接管 better-sidebar 0.28.2 新增的 `git.history`** —— 上游在 `git.graph` 之外又加了一个碰仓库的端点（提交图分支数超上限时的分页历史兜底），未接管时远程工作区里客户端翻历史读的是**本地镜像**仓库；`upstream-drift` 2026-11-02 的定时跑（run 41430536595）报红报的就是它（`缺: git.history`）。修法：`GIT_METHODS` 追加 `history` + `gitHistoryPage`（本地/远端各一套 io），游标与错误码逐条对齐上游（`graph-stale` 409 / `graph-limit` 400），指纹口径改成「全量 `for-each-ref` + HEAD + shallow 边界文件」的 sha256，远端仍是每页 2 次 SSH 往返。前序：2.4.41 修 DSH 0.1.5/0.1.6 settings 代际误判（issue #34）、2.4.40 修密码认证（PR #33））：npm `dist-tags.latest`、tag `v2.4.42`、GitHub Release（Latest）三者一致，commit `26ec265`（2.4.41 = `e77dc19` 发布 / `68e4b95` 文档）。npm tarball 2.4.42 shasum `eae88d3ea9d9a1ee48c2b3cc0b4d06cb26ad980d`（8 个文件 / 301.2 kB / 解开 870,275 B）；仓库 `lib/index.js` SHA256 `7E9695677C42E55A0E3C3A01890472225EF652CB7BBDA04069B14B4A82E42B58`，客户端未改动（`lib/client.js` 与 2.4.41 相同 `CE1770869AD5AFC9DD53A9F08F986F4742CBAE92B808C644D648AC1FF2289363`）。**桌面 profile 仍是 `pnpm add` 的 2.4.41（未升级未重启）** —— 真机路径验证见本版实据的「未做」 |
+| 本地版本 / npm latest / GitHub main | **2.4.43**（2026-11-03 发布，内容：**协作式取消（issue #35）+ Windows 密码认证 askpass 落 ASCII 目录（issue #36）**）—— ① #35：`exec.signal` 全链路接入（此前全文件 **0 次**引用），停止键真正生效；取消以 `isAbort` 返回、丢弃会话/terminate 后等 ≤3 s 停稳、**绝不回退一次性连接重跑**；`runTarPipe`（sync/push）同样可取消；11 个走 SSH 的工具接线；`isAbort` 经 `normExec`/`stripAbort` 净化保证 output schema 合法。② #36：Windows OpenSSH 用**窄字符路径**启动 askpass（`CreateProcessW`/`posix_spawnp`），中文用户名下 `%USERPROFILE%`/`%TEMP%` 非 ASCII → 助手不执行 → ssh 发**空口令** → `Permission denied`（旧提示还误报「公钥认证失败」）；助手改落 `ProgramData` → `Public` → 用户目录并按 `/^[\x20-\x7E]+$/` 校验，新增 `DSH_REMOTE_SSH_ASKPASS` 覆盖，全失败时 `sshArgv()` 抛明确错误，`sshErrorHint(text, p)` 按认证方式归因。前序：2.4.42 接管 better-sidebar 0.28.2 的 `git.history`、2.4.41 修 settings 代际误判（#34）、2.4.40 修密码认证（PR #33）。npm `dist-tags.latest` / tag `v2.4.43` / GitHub Release（Latest）三者一致，commit `7713cbe`（父 `435c848`；2.4.42 = `26ec265`）。npm tarball 2.4.43 shasum `8ed2a94f82f69b40902ec17281e930cd3b1dff23`（8 个文件 / 308,845 B / 解开 890,493 B）；仓库 `lib/index.js` SHA256 `3E79A6C10B37E7C5E75FA59E919FBD5013479AB63934E9ED0AAC8387EBDBC4E5`，客户端未改动（`lib/client.js` 与 2.4.42 相同 `CE1770869AD5AFC9DD53A9F08F986F4742CBAE92B808C644D648AC1FF2289363`）。**桌面 profile 已 `pnpm add` 升到 2.4.43**（装在 profile 里的 `lib/index.js` 与仓库 SHA256 逐字节一致），**但宿主尚未重启 → 运行中的进程仍是 2.4.41** |
 | 仓库 | https://github.com/ZhangFengshun/dsh-remote-ssh（HTTPS，分支 main） |
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
 | 发布可见性 | package.json `publishConfig.access = "public"` |
-| GitHub Release | **v2.4.42 = Latest**。（2026-11-02 核对）有 tag 的 **40 个版本全部有 Release**（含 v2.4.35 – v2.4.42）。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向 `3e65aa0`，产物 blob 与 npm 上 2.4.18 完全相同。npm 上另有 50 个更早版本从未打过 tag —— 不打算批量补（噪音大于价值），要补按 §3 的 `# 0c.` 走 |
+| GitHub Release | **v2.4.43 = Latest**。（2026-11-03 核对）有 tag 的 **41 个版本全部有 Release**（含 v2.4.35 – v2.4.43）。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向 `3e65aa0`，产物 blob 与 npm 上 2.4.18 完全相同。npm 上另有 50 个更早版本从未打过 tag —— 不打算批量补（噪音大于价值），要补按 §3 的 `# 0c.` 走 |
 | 文档（issue #21） | `~/.ssh/config` 的继承语义已按**代码**逐条写进两份 README 的故障排查表：导入 = 把 Host 块抄进连接配置；连接时以 profile 为准（总是 `-p <端口>` + `user@host`），只有 `keyPath` / `proxyJump` 留空才用 config 的值；导入侧只解析 `Host` 块（`Include` 递归）、含 `*`/`?` 的名字跳过、`Match` 块不解析 |
+
+### 2.4.43 发布实据（2026-11-03，issue #35 取消 + issue #36 askpass）
+
+**两项修复同版本发布**（2.4.43 此前未发布过任何正式产物）：
+
+**A. issue #35 —— 协作式取消（停止键生效）**
+现象/根因：DSH 的取消是**协作式**的（注册表不与工具 promise 竞速，工具必须自己观察 `exec.signal` 并在自有工作停稳后返回）；2.4.42 及以前全文件
+`exec.signal` 出现 **0 次** → 停止键只把 turn 标成取消，远端命令照跑；`timeoutMs: 0`（长任务推荐用法）时等待无上限，而兜底
+`remote_ssh_kill` 本身也是一次工具调用，同一 turn 卡住时按不到。报告者用 `sleep 60` 实测：连按 4 次停止键仍耗 60.053 s。
+修法：`withTimeout(promise, ms, label, onTimeout, signal)`（取消 → `isAbort`；**先 reject 再 onTimeout**）；`runRemote` / `runPooled`
+增尾参 `signal`（预取消**不建连**；取消后丢弃会话/`terminate` 并等 ≤3 s 停稳；**绝不回退一次性连接重跑**）；`runTarPipe`（sync/push）
+支持取消；`toolContext.signal` + `signalRunner` 覆盖 11 个走 SSH 的工具；`isAbort` 经 `normExec` / `stripAbort` 净化。
+验证：`tests/cancel.test.mjs` **86 条**（含 3 条变异负向控制：删 abort 分支 / 把 ls 改回裸 runner 必须变红）。
+
+**B. issue #36 —— Windows 密码认证 askpass 落点**
+真机复现（本机 `OpenSSH_for_Windows_9.5p2`，与报告者同版本，不需要远端 sshd）：`ssh-keygen -p` 改口令时由 OpenSSH 亲自调用 askpass，
+同一份**字节完全相同**的助手脚本、只改 `SSH_ASKPASS` 路径 —— 中文目录 → `CreateProcessW failed error:2` +
+`ssh_askpass: posix_spawnp: No such file or directory`；纯 ASCII 目录 → exit 0 `Your identification has been saved with the new passphrase.`。
+修法：`ensureWindowsAskpass()` 按 `ProgramData\dsh-remote-ssh` → `Public\dsh-remote-ssh` → 用户目录（仅整条路径 ASCII 时）回退，
+落盘前 `/^[\x20-\x7E]+$/` 校验，文件名取 `sha256(home)` 前 12 位；`DSH_REMOTE_SSH_ASKPASS` 可覆盖（非 ASCII 值忽略并回退）；
+全失败时 `sshArgv()` **抛明确错误**；`sshErrorHint(text, p)` 按认证方式归因（先识别 `ssh_askpass` 证据，密码连接不再输出 keyPath 清单，
+key 连接行为不变）。
+验证：`tests/askpass-ascii.test.mjs` **39 条**（含真机 E2E 三条：中文路径必失败 → 同字节 ASCII 成功 → 插件落点被真实 `ssh-keygen` 接受）；
+`tests/password-auth.test.mjs` 改为新落点（**29 条**）。
+
+**发布三件套核对**：npm `latest` = **2.4.43**（shasum `8ed2a94f82f69b40902ec17281e930cd3b1dff23`，8 文件 / 308,845 B / 解开 890,493 B）；
+tag `v2.4.43` → `7713cbe`；GitHub Release `v2.4.43` = **Latest**（`2026-11-03T01:27:13Z`）。CI：`tests` run `41559514943` success
+（`headSha 7713cbe`，41 文件 / 2226 断言）；`upstream-drift` 本周无新跑（未改端点）。issue 回帖：#35 `issuecomment-6593032666`、#36 `issuecomment-6593033147`。
+
+**桌面 profile**：`pnpm add @zhangfengshun/dsh-remote-ssh@2.4.43` 成功（`minimumReleaseAgeExclude` 里已有本包，不受 24 h 窗口限制），
+`node_modules/.../lib/index.js` SHA256 与仓库一致；**宿主未重启 → 运行中的进程仍是 2.4.41**（重启必须在 GUI 里点「立即重启」；非 UI 的 restart 接口返回 401）。
+
+**未做（诚实记录）**：① GUI 里真按停止键的端到端验证未做（需真实 profile + 运行中的宿主），当前证据是「真实函数 + 可编排假会话/假管道」的沙箱；
+② 手头没有中文用户名的 Windows 机器，「设置 → 远程连接 → 测试连接」的真实 GUI 流程未做，`ssh-keygen` 走的是 OpenSSH 内部同一条 askpass 通路。
 
 ### 2.4.42 发布实据（2026-11-02，upstream-drift 报红）
 
@@ -189,7 +223,9 @@ PR 工作流对首次贡献者默认 `action_required`，由维护者放行后 *
 
 探针写法注记（踩过一次）：`/remote-ssh/api/*` 必须带 `x-requested-with` 头；其 HTTP 返回是 `{"ok":true,"value":{…}}` **信封**，
 直接读 `body.workspaces` 会得到 undefined 并误判成"0 个工作区"（`fs.*` 同样是 `value` 信封）。
-### 端点接管清单（截至 2.4.42）
+### 端点接管清单（截至 2.4.43）
+
+- **2.4.43 无新增/变更路由**：两项修复都在工具层与连接层（取消信号、askpass 落点），HTTP 端点与 output schema 均未变，路由数仍为 **32**。
 
 - **2.4.37 – 2.4.39 期间无新增/变更路由**：三版只改内部逻辑与客户端渲染（角标认行方式、id 漂移自愈、壳层删区联动）；2.4.39 的联动挂在 `workspaceRegistry.delete` 服务方法上，不是 HTTP 端点，`getPrefs` 只是多回一个 `deleteSync` 字段。
 - **2.4.42 接 better-sidebar 0.28.2 的 `git.history`**（提交图分支数超上限时的分页历史兜底）：上游 0.28.2 在 `git.graph` 之外又加了一个碰仓库的端点，未接管时远程工作区会拿本地镜像列历史 —— `upstream-drift` 2026-11-02 报红报的就是这一项（`sidebar-0250` 的 C9 对拍 `缺: git.history`）。实现与 `git.graph` 同形但指纹口径不同：**全量 `for-each-ref`（不限 heads/remotes）+ HEAD + shallow 边界文件**的 sha256，`graph-stale` 409 / `graph-limit` 400 复用同一组错误码。远端那段 sh 有独立验证：`node scripts/verify-remote-history-script.mjs`（WSL 真 sh + 真 git，25 条；与 `verify-remote-status-script.mjs` 同套路 —— 假 SSH 出口只能验数据流，验不了 POSIX 正确性）。
@@ -236,6 +272,17 @@ fs 处理器**不再用会话 cwd 决定"这次请求走不走远端"**，而是
 两条附加守卫：镜像根之下、但不属于任何已注册工作区的路径 → `400`（2.4.29 起，绝不在镜像上读写）；同一次请求里混用本机路径与镜像/远端路径 → `400`（猜一侧会让另一侧被静默忽略）。
 
 **刻意保留、需要知道的两点**：① **本地会话**打开镜像成员路径仍走**远端**（镜像不是事实来源）；② 远端会话里的**相对路径**是**工作区相对**（相对镜像根），不是本机进程 cwd 相对。`localToRemote()` 的契约是"入参必须是本地镜像路径"，兜底命中会打 `warn`（2.4.30 起）—— 命中即说明上游分类漏了，别再调回 `debug`。
+8. **`withTimeout` 必须「先 reject 再 onTimeout」；取消绝不回退重跑（2026-11-03，issue #35 的测试抓出的真 bug）**：`onTimeout` 会
+   `terminate` 子进程 / `close` 会话，被它顺带 settle 的 `done` / `exec` 可能抢在 race 之前落地，把「超时/取消」误报成「命令自己失败了」
+   （`tests/cancel.test.mjs` 的 F2/F8 就是抓这个的）。另外**取消绝不能回退一次性连接**：那条回退是「会话挂了」的自动重连，
+   用它处理取消等于把用户刚停掉的命令再执行一遍（与 issue #5「超时不重试」同一条不变量）。
+9. **Windows OpenSSH 用窄字符路径启动 askpass（2026-11-03，issue #36）**：`SSH_ASKPASS` 路径含非 ASCII（中文用户名 → `%USERPROFILE%`
+   与 `%TEMP%` 都非 ASCII）时助手根本不会执行，ssh 发**空口令**、服务端只回 `Permission denied`。复现不需要 sshd：
+   `ssh-keygen -t ed25519 -N pass1 -f key` 之后用 `SSH_ASKPASS=<路径> SSH_ASKPASS_REQUIRE=force RSSH_ASKPASS_PW=pass1 ssh-keygen -p -f key -N pass2`
+   —— 失败时就是 `CreateProcessW failed error:2` + `ssh_askpass: posix_spawnp`。纪律：**任何交给外部进程的可执行路径都要先校验纯 ASCII**
+   （2.4.43 的 `isAsciiAskpassPath()`），并给出 `DSH_REMOTE_SSH_ASKPASS` 这样的显式覆盖口；落点写不进去时要**抛明确错误**，
+   不能让下游用一个空凭证去撞 `Permission denied` 再把用户引向错误方向。
+
 ## 1. GitHub 连接机制（如何工作的）
 
 **认证链路**：`git push origin main` → git 调 credential helper → gh CLI 提供 token。
