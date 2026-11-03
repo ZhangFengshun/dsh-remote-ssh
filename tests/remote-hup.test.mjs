@@ -17,9 +17,10 @@
  */
 import fs from 'node:fs'
 import { EventEmitter } from 'node:events'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert'
 
-const ROOT = 'F:/MyAIProject/RemoteSSH/dsh-remote-ssh'
+const ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]$/, '')
 const src = fs.readFileSync(ROOT + '/lib/index.js', 'utf8')
 let passed = 0
 let failed = 0
