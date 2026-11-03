@@ -7,13 +7,56 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本地版本 / npm latest / GitHub main | **2.4.43**（2026-11-03 发布，内容：**协作式取消（issue #35）+ Windows 密码认证 askpass 落 ASCII 目录（issue #36）**）—— ① #35：`exec.signal` 全链路接入（此前全文件 **0 次**引用），停止键真正生效；取消以 `isAbort` 返回、丢弃会话/terminate 后等 ≤3 s 停稳、**绝不回退一次性连接重跑**；`runTarPipe`（sync/push）同样可取消；11 个走 SSH 的工具接线；`isAbort` 经 `normExec`/`stripAbort` 净化保证 output schema 合法。② #36：Windows OpenSSH 用**窄字符路径**启动 askpass（`CreateProcessW`/`posix_spawnp`），中文用户名下 `%USERPROFILE%`/`%TEMP%` 非 ASCII → 助手不执行 → ssh 发**空口令** → `Permission denied`（旧提示还误报「公钥认证失败」）；助手改落 `ProgramData` → `Public` → 用户目录并按 `/^[\x20-\x7E]+$/` 校验，新增 `DSH_REMOTE_SSH_ASKPASS` 覆盖，全失败时 `sshArgv()` 抛明确错误，`sshErrorHint(text, p)` 按认证方式归因。前序：2.4.42 接管 better-sidebar 0.28.2 的 `git.history`、2.4.41 修 settings 代际误判（#34）、2.4.40 修密码认证（PR #33）。npm `dist-tags.latest` / tag `v2.4.43` / GitHub Release（Latest）三者一致，commit `7713cbe`（父 `435c848`；2.4.42 = `26ec265`）。npm tarball 2.4.43 shasum `8ed2a94f82f69b40902ec17281e930cd3b1dff23`（8 个文件 / 308,845 B / 解开 890,493 B）；仓库 `lib/index.js` SHA256 `3E79A6C10B37E7C5E75FA59E919FBD5013479AB63934E9ED0AAC8387EBDBC4E5`，客户端未改动（`lib/client.js` 与 2.4.42 相同 `CE1770869AD5AFC9DD53A9F08F986F4742CBAE92B808C644D648AC1FF2289363`）。**桌面 profile 已 `pnpm add` 升到 2.4.43**（装在 profile 里的 `lib/index.js` 与仓库 SHA256 逐字节一致），**但宿主尚未重启 → 运行中的进程仍是 2.4.41** |
+| 本地版本 / npm latest / GitHub main | **2.4.44**（2026-11-03 发布，内容：**2.4.43 复测收尾 —— 取消 / `remote_ssh_kill` 会终止远端进程组（issue #35）**）—— 复测确认 2.4.43 的停止键已秒级生效（`sleep 60` 6.06 s，旧版 60.05 s），但**只断开了本地 ssh**：远端命令继续跑完（`END` 在 turn 结束后才写日志、`ps` 里有孤儿），`timeoutMs` 超时同样只放弃等待。修法：池化会话建连先写探针 `printf '\002RSSHPID%s\002\n' "$$"`（先于任何排队命令），解析后**剥离标记**并记下远端 shell PID（真机确认 `PID=PGID=SID`）；取消与 kill 用独立一次性通道 `kill -HUP -<pgid>`（4s 短超时、**不复用已取消的 signal**、与本地停稳并行）；用 HUP 而非 TERM（`nohup`/`setsid` 存活）；超时 / 断连不杀远端并写进文档。前序：2.4.43 协作式取消 + askpass ASCII、2.4.42 `git.history`、2.4.41 settings 代际（#34）、2.4.40 密码认证（PR #33）。npm `dist-tags.latest` / tag `v2.4.44` / GitHub Release（Latest）三者一致，commit `8dc37b8`（父 `d955025`）。npm tarball 2.4.44 shasum `463af7a60989caa04742521c00f1cfd1d505671d`（8 个文件 / 312,267 B / 解开 899,434 B）；仓库 `lib/index.js` SHA256 `B6A6EC24EDC9BA078A3E783115B2DB088DAF3BF10274666691EDCE446D2AACEA`，客户端未改动（`lib/client.js` 仍为 `CE1770869AD5AFC9DD53A9F08F986F4742CBAE92B808C644D648AC1FF2289363`）。**桌面 profile 已 `pnpm add` 到 2.4.44**（装上的 `lib/index.js` 与仓库 SHA256 逐字节一致），**宿主仍未重启 → 运行中的进程仍是 2.4.41** |
 | 仓库 | https://github.com/ZhangFengshun/dsh-remote-ssh（HTTPS，分支 main） |
 | npm 账号 | `npm whoami` → `zhangfengshun` ✅ |
 | gh CLI | v2.97.0，已登录 `ZhangFengshun`（keyring），scopes: admin:public_key, gist, read:org, repo |
 | 发布可见性 | package.json `publishConfig.access = "public"` |
-| GitHub Release | **v2.4.43 = Latest**。（2026-11-03 核对）有 tag 的 **41 个版本全部有 Release**（含 v2.4.35 – v2.4.43）。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向 `3e65aa0`，产物 blob 与 npm 上 2.4.18 完全相同。npm 上另有 50 个更早版本从未打过 tag —— 不打算批量补（噪音大于价值），要补按 §3 的 `# 0c.` 走 |
+| GitHub Release | **v2.4.44 = Latest**。（2026-11-03 核对）有 tag 的 **42 个版本全部有 Release**（含 v2.4.35 – v2.4.44）。2026-10-16 补了 `v2.4.18`（当时只发了 npm、没打 tag）：tag 指向 `3e65aa0`，产物 blob 与 npm 上 2.4.18 完全相同。npm 上另有 50 个更早版本从未打过 tag —— 不打算批量补（噪音大于价值），要补按 §3 的 `# 0c.` 走 |
 | 文档（issue #21） | `~/.ssh/config` 的继承语义已按**代码**逐条写进两份 README 的故障排查表：导入 = 把 Host 块抄进连接配置；连接时以 profile 为准（总是 `-p <端口>` + `user@host`），只有 `keyPath` / `proxyJump` 留空才用 config 的值；导入侧只解析 `Host` 块（`Include` 递归）、含 `*`/`?` 的名字跳过、`Match` 块不解析 |
+
+### 2.4.44 发布实据（2026-11-03，issue #35 复测收尾：取消 = 终止远端进程组）
+
+**来源**：#35 报告者 `2026-11-03T05:38:26Z` 的复测：2.4.43 的取消已秒级生效（`sleep 60` → 6.06 s、`sleep 120` → 6.69 s；
+取消后本地 ssh 无残留、下一条命令 0.9 s、远端没有重跑），但发现两点 ① **远端命令继续跑完**（`START`→`END` 跨 turn、
+`ps` 可见孤儿，而本地 ssh 已消失）② **`timeoutMs` 被文档写成「超时=终止」**，实测超时后远端进程仍存活（`PPID=1`）。
+
+**修法**：
+
+- `CommandSession`：建连后先往 stdin 写 `printf '\002RSSHPID%s\002\n' "$$"`（早于任何排队命令）；stdout 到达时 `_absorbPid()` 解析并
+  **从缓冲剥离标记**记进 `remotePid`；重连清空重探（防 pid 复用误杀）、远端非 bash 时缓冲 >8 KiB 即放弃；
+  标记用 `\002…\002` 包裹，不会和普通输出混淆。
+- `hupRemoteGroup(p, pgid)`：`Number.isInteger` 严格校验（1 < pid ≤ `0x7fffffff`），走 `runRemote` 的**独立一次性连接**
+  执行 `kill -HUP -<pid> 2>/dev/null; true`，4 s 短超时、**不传 signal**、异常吞掉返回 false（best-effort）。
+- `runPooled`：abort 分支 `Promise.all([settleWithin(execP, 3000), hupRemoteGroup(p, remotePgid)])` —— 两件事并行，
+  取消返回不被多等一个 RTT；PGID 在 `dropSession()` **之前**从会话对象取（`withTimeout` 的 `onTimeout` 已经关过一次会话）；
+  超时分支**不加** HUP。
+- `remote_ssh_kill`：单连接与 `all` 两个分支都在 `close` / `delete` 之前发起 HUP 并 await（内部 4 s 上限兜底）。
+- 文档：`remote_ssh_exec` / `remote_ssh_kill` / `timeoutMs` 的工具描述 + 两份 README 三处（超时章节、工具表、排错表）；
+  CHANGELOG 2.4.44。
+
+**验证**：
+
+- `tests/remote-hup.test.mjs`（**42 条**）：探针逐字节断言（含双美元符）、标记解析/剥离、只探一次、重连重置、
+  超长缓冲放弃；`hupRemoteGroup` 短路/独立通道/短超时/不传 signal/失败吞掉；runPooled 与 kill 的接线顺序、
+  超时分支无 HUP；两份 README 语义断言；4 条变异负向控制。`tests/cancel.test.mjs` +8 条（94 条）。
+- 真机 E2E `scripts/verify-remote-hup-group.mjs`（参数化、不含真实主机；真实 sshd + 真 bash）：**7/7 通过** ——
+  `PID=PGID=SID`、断本地 ssh 后远端 `sleep` 存活、`kill -HUP -<pgid>` 后前台 `sleep` 消失、`nohup` 后台任务存活。
+- 全量 **42 文件 / 2276 断言 / 0 失败**（本机）。
+
+**发布三件套核对**：npm `latest` = 2.4.44（shasum `463af7a60989caa04742521c00f1cfd1d505671d`，8 文件 / 312,267 B / 解开 899,434 B）；
+tag `v2.4.44` → `8dc37b8`；GitHub Release `v2.4.44` = **Latest**（`2026-11-03T08:30:17Z`）。issue 回帖 `issuecomment-6598951735`。
+
+**CI 插曲（记一笔）**：发布提交 `8dc37b8` 的 `tests` run `41603691475` **报红** —— 新测试把仓库根写死成 `F:/MyAIProject/...`，
+在 Actions 上直接 **CRASH**（汇总显示 `[CRASH]`、**不计入「失败」计数**，只看「结果: 0 失败」会漏掉）。修复提交 `4f013c3`
+改成 `fileURLToPath(new URL('..', import.meta.url))`，run `41604152468` **success**。npm 上的 2.4.44 产物不受影响（只改测试文件，`lib/` 未变）。
+
+**桌面 profile**：已 `pnpm add @zhangfengshun/dsh-remote-ssh@2.4.44`，profile 内 `lib/index.js` SHA256 与仓库一致；
+**宿主未重启，运行中的仍是 2.4.41**（重启要 GUI 里点「立即重启」；非 UI 的 restart 接口返回 401）。
+
+**未做（诚实记录）**：① 没有在 GUI 里真按一次停止键（需要运行中宿主 + 真实 profile）；② `remote_ssh_sync` / `remote_ssh_push`
+的远端 `tar` 未单独发 HUP（管道两端终止后远端 tar 会因 EPIPE 自行退出）；③ 没有中文用户名的 Windows 机器做 GUI E2E（#36 仍用 `ssh-keygen` 通路）。
+
 
 ### 2.4.43 发布实据（2026-11-03，issue #35 取消 + issue #36 askpass）
 
@@ -223,7 +266,7 @@ PR 工作流对首次贡献者默认 `action_required`，由维护者放行后 *
 
 探针写法注记（踩过一次）：`/remote-ssh/api/*` 必须带 `x-requested-with` 头；其 HTTP 返回是 `{"ok":true,"value":{…}}` **信封**，
 直接读 `body.workspaces` 会得到 undefined 并误判成"0 个工作区"（`fs.*` 同样是 `value` 信封）。
-### 端点接管清单（截至 2.4.43）
+### 端点接管清单（截至 2.4.44）
 
 - **2.4.43 无新增/变更路由**：两项修复都在工具层与连接层（取消信号、askpass 落点），HTTP 端点与 output schema 均未变，路由数仍为 **32**。
 
@@ -282,6 +325,12 @@ fs 处理器**不再用会话 cwd 决定"这次请求走不走远端"**，而是
    —— 失败时就是 `CreateProcessW failed error:2` + `ssh_askpass: posix_spawnp`。纪律：**任何交给外部进程的可执行路径都要先校验纯 ASCII**
    （2.4.43 的 `isAsciiAskpassPath()`），并给出 `DSH_REMOTE_SSH_ASKPASS` 这样的显式覆盖口；落点写不进去时要**抛明确错误**，
    不能让下游用一个空凭证去撞 `Permission denied` 再把用户引向错误方向。
+
+10. **测试里不要写死仓库绝对路径（2026-11-03，2.4.44 的 CI 报红）**：本机全绿 ≠ CI 全绿 —— 把仓库根写成
+   `F:/MyAIProject/...` 后，GitHub Actions 上该文件直接 **CRASH**，而 `tests/run-all.mjs` 的汇总把它记成
+   「1 个文件有问题」，**「结果: N 通过, 0 失败」仍然显示 0 失败**，只看最后一行会以为通过。纪律：仓库根一律
+   `fileURLToPath(new URL('..', import.meta.url))`（或至少 `new URL('..', import.meta.url).pathname`），
+   推送后扫一眼 run 日志里的「有问题的文件 / [CRASH]」段。
 
 ## 1. GitHub 连接机制（如何工作的）
 
