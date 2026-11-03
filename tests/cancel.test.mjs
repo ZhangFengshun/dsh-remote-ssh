@@ -125,9 +125,9 @@ function grab(text, name) {
   ].join('\n')
 
   function makeHarness(opts) {
-    const rec = { calls: [], sessions: new Map(), closed: 0, created: 0, runRemote: [] }
+    const rec = { calls: [], sessions: new Map(), closed: 0, created: 0, runRemote: [], hups: [] }
     const o = opts || {}
-    const factory = new Function('resolveTimeoutMs', 'sessions', 'getSession', 'sessionKeyOf', 'sshErrorHint', 'subprocess', 'runRemote',
+    const factory = new Function('resolveTimeoutMs', 'sessions', 'getSession', 'sessionKeyOf', 'sshErrorHint', 'subprocess', 'runRemote', 'hupRemoteGroup',
       code + '\nreturn { runPooled };')
     const { runPooled } = factory(
       (ms) => (ms === 0 ? 0 : (ms > 0 ? ms : 120000)),
@@ -135,6 +135,7 @@ function grab(text, name) {
       (p, role) => {
         rec.created++
         const s = {
+          remotePid: o.pgid || 0,
           close() { rec.closed++; if (o.onClose) o.onClose() },
           exec(cmd, stdin, split) { rec.calls.push({ cmd, split }); return o.exec(cmd, stdin, split) }
         }
@@ -149,6 +150,11 @@ function grab(text, name) {
       async function (subprocess, p, cmd, stdinData, maxBytes, extraOpts, timeoutMs, signal) {
         rec.runRemote.push({ cmd, timeoutMs, signal })
         return { ok: true, exitCode: 0, stdout: 'oneshot', stderr: '', truncated: false, error: '' }
+      },
+      async function (p, pgid) {
+        rec.hups.push({ p, pgid })
+        if (o.hup) return o.hup(p, pgid)
+        return true
       }
     )
     return { runPooled, rec }
@@ -227,6 +233,61 @@ function grab(text, name) {
     process.off('unhandledRejection', onUnhandled)
     check(r.isAbort === true, 'B17 取消返回 isAbort')
     check(unhandled.length === 0, 'B18 被放弃的 exec promise 没有 unhandledRejection')
+  }
+
+  // B19 取消 → 给远端进程组发 HUP（issue #35 复测建议：只断本地 ssh，远端命令会继续跑完）
+  {
+    const ac = new AbortController()
+    const h = makeHarness({
+      pgid: 4242,
+      exec: () => new Promise((resolve) => { h.pendingResolve = resolve }),
+      onClose: () => { if (h.pendingResolve) h.pendingResolve({ exitCode: 255, stdout: '', stderr: '' }) }
+    })
+    const p = h.runPooled({ id: 'p1' }, 'sleep 45', undefined, undefined, true, 0, undefined, ac.signal)
+    setTimeout(() => ac.abort(), 30)
+    const r = await p
+    check(r.isAbort === true, 'B19 取消仍返回 isAbort')
+    check(h.rec.hups.length === 1 && h.rec.hups[0].pgid === 4242, 'B20 取消时用会话记录的 PGID 发 HUP（实际 ' + JSON.stringify(h.rec.hups) + '）')
+    check(h.rec.hups[0].p && h.rec.hups[0].p.id === 'p1', 'B21 HUP 用的是该连接的 profile')
+  }
+
+  // B22 老会话 / 非 bash 远端：PGID 未知（0）→ 传 0 给收尾助手（由 hupRemoteGroup 自身短路，不发 SSH）
+  {
+    const ac = new AbortController()
+    const h = makeHarness({
+      exec: () => new Promise((resolve) => { h.pendingResolve = resolve }),
+      onClose: () => { if (h.pendingResolve) h.pendingResolve({ exitCode: 255, stdout: '', stderr: '' }) }
+    })
+    const p = h.runPooled({ id: 'p1' }, 'sleep 45', undefined, undefined, true, 0, undefined, ac.signal)
+    setTimeout(() => ac.abort(), 30)
+    const r = await p
+    check(r.isAbort === true && h.rec.hups.length === 1 && h.rec.hups[0].pgid === 0, 'B22 PGID 未知时传 0（收尾助手短路，不发 SSH）')
+  }
+
+  // B23 超时**不**杀远端：文档语义是「取消 = 终止；超时 = 仅放弃等待」
+  {
+    const h = makeHarness({ pgid: 4242, exec: () => new Promise(() => {}) })
+    const r = await h.runPooled({ id: 'p1' }, 'sleep 45', undefined, undefined, true, 30)
+    check(r.isTimeout === true, 'B23 超时仍是 isTimeout')
+    check(h.rec.hups.length === 0, 'B24 超时不发 HUP（远端命令可能继续运行，文档已写明）')
+  }
+
+  // B25 HUP 很慢也不拖住取消返回（内部有独立短超时，且与停稳并行）
+  {
+    const ac = new AbortController()
+    const h = makeHarness({
+      pgid: 4242,
+      exec: () => new Promise((resolve) => { h.pendingResolve = resolve }),
+      onClose: () => { if (h.pendingResolve) h.pendingResolve({ exitCode: 255, stdout: '', stderr: '' }) },
+      hup: async () => { await sleep(400); return true }
+    })
+    const t0 = Date.now()
+    const p = h.runPooled({ id: 'p1' }, 'sleep 45', undefined, undefined, true, 0, undefined, ac.signal)
+    setTimeout(() => ac.abort(), 30)
+    const r = await p
+    const dt = Date.now() - t0
+    check(r.isAbort === true, 'B25 HUP 慢时取消仍返回 isAbort')
+    check(dt < 1500, 'B26 HUP 与本地停稳并行，取消返回不被拖长（' + dt + 'ms）')
   }
 }
 

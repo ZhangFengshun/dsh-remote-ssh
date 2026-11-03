@@ -46,7 +46,7 @@
 **一条命令安装**（无需 token、API Key 或额外配置）：
 
 ```bash
-dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.43
+dsh plugin --profile <name> add @zhangfengshun/dsh-remote-ssh@2.4.44
 ```
 
 安装后**重启 DSH**。`@zhangfengshun/dsh-remote-ssh` 必须在 bundles 列表中排在 `dsh-better-sidebar` **之后**。
@@ -120,6 +120,8 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 
 `timeoutMs: 0` 禁用本次超时；环境变量 `DSH_REMOTE_SSH_CMD_TIMEOUT_MS=600000` 可改全局默认。超时后池化会话自动丢弃重建，`remote_ssh_kill` 是随时可用的手动兜底。
 
+**远端语义（2.4.44 起写清）**：`timeoutMs` 只是**本地等待预算** —— 到点只放弃等待并丢弃会话，**不会终止远端命令**（远端进程可能继续运行，输出不再回传；断开连接 / 退出 DSH 同理）。需要远端硬时限请用远端自己的 `timeout <秒> <命令>`。**按停止键取消**与 `remote_ssh_kill` 才代表「终止」：插件会给远端 shell 所在的进程组发 SIGHUP（最多等 4s；与关终端同义，`nohup` / `setsid` 起的任务不受影响）。
+
 **示例 4 · 远程工作区内的工具调用**（免填 `profileId`，相对路径基于工作区远程目录）：
 
 ```json
@@ -174,8 +176,8 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | 工具 | 用途 |
 | --- | --- |
 | `remote_ssh_profiles` | 列出连接配置 + 当前会话远程工作区上下文 |
-| `remote_ssh_exec` | 执行远程命令（默认 120s 命令级超时，`timeoutMs` 可放宽/禁用） |
-| `remote_ssh_kill` | 强制关闭池化 SSH 会话（挂起命令的兜底恢复） |
+| `remote_ssh_exec` | 执行远程命令（默认 120s **本地等待预算**，`timeoutMs` 可放宽/禁用；按停止键取消会 SIGHUP 远端进程组） |
+| `remote_ssh_kill` | 强制关闭池化 SSH 会话，并尽力给远端进程组发 SIGHUP（挂起命令的兜底恢复） |
 | `remote_ssh_ls` | 列举远程目录 |
 | `remote_ssh_cat` | 读取远程文件 |
 | `remote_ssh_write` | 写入远程文件 |
@@ -206,6 +208,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 - **超时后自动恢复**：池化会话超时即被丢弃并自动重建，后续命令照常执行；一次性连接超时即终止 SSH 进程；
 - **显式放宽**：`remote_ssh_exec` 传 `timeoutMs`（毫秒）覆盖单次预算，`0` 禁用超时（长时构建/训练）；环境变量 `DSH_REMOTE_SSH_CMD_TIMEOUT_MS` 覆盖全局默认；
 - **手动兜底**：`remote_ssh_kill`（或 `all: true`）强制关闭某个/全部池化会话，挂起命令随时可清理；
+- **取消 / 超时 / kill 的远端语义**：按停止键取消与 `remote_ssh_kill` 会尽力**终止远端进程组**（SIGHUP，最多等 4s）；`timeoutMs` 超时、断连只**放弃等待**，远端命令可能继续运行（需要硬时限请用远端 `timeout`）；
 - 超时命令**不做自动重试**（重试一条挂起的命令只会再次挂起），由模型决定是否改用 `remote_ssh_kill` 或换命令重试。
 
 ## 兼容性
@@ -272,7 +275,7 @@ dsh plugin --profile <name> remove @zhangfengshun/dsh-remote-ssh
 | **远程工作区里文件树「新建文件」看着成功了，远端却没有这个文件；git 面板的 blame / 工作树 / 拉取 / 推送结果不对，或报 `not a git repository`** | **2.4.28 起已修复**。better-sidebar **0.25.0** 新增了 9 个端点，其中 6 个与仓库/路径相关，而本插件此前没有注册它们 —— 本插件用 `exact` 路由接管 `/sidebar/api/fs.*` 与 `git.*`，**没注册的端点会回落到上游实现**，而远程工作区里上游拿到的 cwd 是**本地镜像目录**：`fs.createFile` 于是只在镜像里建了个空文件（远端永远没有，与 2.4.18 那次 `fs.trees` 绕过拦截同一类）；`git.blame` / `git.diff-head` / `git.worktrees` 按镜像的 git 状态计算（镜像通常没有 `.git`，于是空结果或报错）；`git.pull` / `git.push` 动的更是镜像那个与远端无关的仓库。2.4.28 起这 6 个端点全部接管并在**远端**执行；纯模型端点（`git.models` / `git.suggest-message` / `git.commit-model`）不碰仓库路径，仍交给上游。升级到 **2.4.28** 并重启 DSH 即可 |
 | **在会话目录里写的草稿/临时文件被无声推到远端（共享集群的项目目录）** | 写回桥对 agent 的 `write`/`edit` 是"落镜像 + 推远端"（issue #24 的护栏建议）。工作区可设 `writeBack: false` 整体关掉写回，或用 `writeBackExclude` 排除路径：镜像相对路径、支持 `*` / `**` / `?`，结尾带 `/` 视为目录前缀，例如 `["_patch/**", "*.log", "scratch/"]`。两者都**只影响写回**，`remote_ssh_push` 仍可手工把需要的东西推上去 |
 | **远程工作区里写/删的文件没落到远端，或报 `400 ENOENT … lstat '<镜像路径>'`；在**子目录**里开的会话尤其容易遇到** | **2.4.29 起已修复**。远程工作区的判定此前只认"正好放着 `.remote-ssh.json` 的那一级目录"（`readRemoteInfoSync` **不向上遍历**）：真实客户端总带有效 `sessionId`（会话 cwd = 镜像根）所以一直没暴露，但**会话在工作区子目录里启动**、或客户端带了**过期/未知 sessionId**（判定回退到请求里的 `path`）时会漏判 —— 漏判的后果是写/删**静默作用在本地镜像**上。2.4.29 起判定改为按**工作区根前缀**匹配（同时修掉"拿更深的路径当基准、远端路径少一段"的映射问题；`@` 文件引用补全同样受益）。另外，**镜像目录下但不属于任何已注册工作区**的路径现在**明确报错**（读写都报），不再当成本地路径去操作。升级到 **2.4.29** 并重启 DSH 即可 |
-| 命令卡住不返回 | 默认 120s 超时后自动丢弃会话；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 强杀 |
+| 命令卡住不返回 | 默认 120s 超时后自动丢弃会话（**超时不杀远端命令**）；长时任务用 `timeoutMs: 0`，随时可用 `remote_ssh_kill` 或按停止键取消 —— 两者都会 SIGHUP 远端进程组 |
 | 大文件读取被截断 | 单文件读取上限 4MB、下载池化路径约 6.29MB（更大自动回落一次性连接）；用 `remote_ssh_exec` + `head`/`tail` 分段处理 |
 | **远程工作区会话里，本机绝对路径读不到、写/删落在远端；或者远端绝对路径（`/mnt/...`、`/tmp/x.log`）一律打不开** | **2.4.30 起已修复（issue #26）**。判定"这次请求走不走远端"此前只看**会话 cwd**：会话在远程工作区 → 整条请求都进远端分支。于是 ① 本机绝对路径被推到远端（`<远端根>/Users/...`），读报 `No such file`，**远端恰好有同路径文件时会静默返回另一份文件**，`fs.write` 本机不落盘、`fs.remove`/`fs.rename` 把删除/重命名打到远端；② 远端绝对路径被当成相对路径再拼一次远端根（`<root><root>/...`）。现在按**每条请求路径**的归属决定：镜像成员 → 远端映射；盘符/UNC（含 `C:foo`）→ **本地**，即使会话在远程工作区；`/...` 远端绝对路径 → **原样下发**；相对路径 → 按会话 cwd；同一次请求混用本机与远端/镜像路径 → 明确 `400`（不再猜一侧）。同一版把 `localToRemote()` 那句"镜像之外按相对路径处理"的兜底从 `debug` 提到 `warn`（真被触发说明又出现同类误判） |
 | **「添加工作区」→「📁 本地目录」tab 一打开就报「path 为必填项」，目录树空、无法添加本地工作区** | **2.4.31 起已修复（issue #27）**：这是 2.4.27 为修 issue #25 引入 `localPathOf()` 时误伤的 —— 弹窗首次打开会**按设计**发空路径（语义是「打开主目录」，`lib/client.js` 有注释、`localListDir()` 也有 `homedir()` 兜底），而空路径被一律判 400。现在只放行「无会话 cwd + 空路径 + `fs.tree` 这个只读方法」；**写操作、相对路径、其它方法一律照旧报错**。临时绕过：在路径栏手填完整本地绝对路径再点「打开」 |

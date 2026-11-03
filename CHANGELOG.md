@@ -2,6 +2,39 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.44] — 2026-11-03
+
+### 修（2.4.43 复测收尾）：按停止键 / `remote_ssh_kill` 现在会终止**远端**进程（issue #35 复测）
+
+**现象**（报告者真机复测，本机同版本复核一致）：2.4.43 让停止键在秒级返回了，但只断开了本地 ssh ——
+远端命令继续跑完（`sleep 60` 的 `END` 在 turn 结束后才写日志，`ps` 里仍有孤儿进程）；`timeoutMs` 超时同样只是放弃等待。
+语义上「按停止」≈「关终端」，应当终止远端。
+
+**根因**：取消只 `dropSession()`（本地 ssh 退出），远端 bash 及其前台子进程收不到任何信号。
+
+**修法**：
+
+- 池化会话建连时先写一条探针 `printf '\002RSSHPID%s\002\n' "$$"`（比任何排队命令都先执行），从 stdout 解析后
+  **剥离标记**并记下远端 shell 的 PID（池化 bash 是会话首进程，PID = PGID = SID）；断线重连清空重探，
+  远端非 bash 时超长缓冲即放弃（退化为旧行为）；
+- 取消（abort 分支）与 `remote_ssh_kill` 都用**独立一次性通道**发 `kill -HUP -<pgid>`（短超时 4s，
+  **绝不复用已取消的 `exec.signal`**），并与本地停稳**并行**，不额外拖长取消返回；
+- 用 **SIGHUP** 而非 SIGTERM：与关终端一致，`nohup` / `setsid` 起的任务照常存活；
+- 超时 / 断连**不**发 HUP —— 文档写清「取消 = 终止；超时 = 仅放弃等待」。
+
+**验证**：
+
+- 新增 `tests/remote-hup.test.mjs`（42 条）：探针写入 / 解析 / 剥离 / 只探一次 / 重连重置、`hupRemoteGroup` 短路与独立通道、
+  runPooled 与 kill 的接线顺序、工具描述与两份 README 的语义断言、4 条变异负向控制；
+  `tests/cancel.test.mjs` 增 8 条（取消发 HUP、PGID 未知传 0、超时不发、HUP 慢也不拖长返回）。
+- 真机 E2E（`scripts/verify-remote-hup-group.mjs`，真实 sshd）：池化 shell `PID=PGID=SID`；仅杀本地 ssh → 远端 `sleep` 存活；
+  `kill -HUP -<pgid>` → 前台 `sleep` 消失、`nohup` 后台任务存活。全部通过。
+- 全量 **42 文件 / 2276 断言 / 0 失败**。
+
+**未做（诚实记录）**：没有在 GUI 里真按一次停止键验证（需要运行中宿主 + 真实 profile）；
+本轮证据是真实函数沙箱 + 真机 sshd 上「探针 + 进程组 HUP」这条链路的实测。
+`remote_ssh_sync` / `remote_ssh_push` 的远端 `tar` 未单独发 HUP（管道两端终止后远端 tar 会因 EPIPE 自行退出）；如需强制清掉远端 tar，用 `remote_ssh_kill` 或在远端手动处理。
+
 ## [2.4.43] — 2026-11-03
 
 **协作式取消（issue #35）：`remote_ssh_*` 工具现在真的能被「停止键」停下。**
