@@ -211,8 +211,15 @@ const D = String.fromCharCode(36)
 {
   console.log('E. 真机验证脚本')
   const p = ROOT + '/scripts/verify-remote-hup-group.mjs'
+  const scriptsDir = fs.existsSync(ROOT + '/scripts')
   const exists = fs.existsSync(p)
-  check(exists, 'E1 scripts/verify-remote-hup-group.mjs 存在（真机复现路径可重跑）')
+  // issue #35 复测者指出：npm 包只发 package.json「files」里的文件，不含 scripts/ ——
+  // 从发布包（无 scripts 目录）里跑本测试时 E1 不该变红；仓库内缺文件才必须红。
+  if (!exists && !scriptsDir) {
+    console.log('    · E1 跳过：发布包不含 scripts/（真机脚本只随仓库提供）')
+  } else {
+    check(exists, 'E1 scripts/verify-remote-hup-group.mjs 存在（真机复现路径可重跑）')
+  }
   if (exists) {
     const t = fs.readFileSync(p, 'utf8')
     check(t.includes('kill -HUP -') && t.includes('RSSHPID'), 'E2 脚本按同一套假说验证（探针 + 进程组 HUP）')
