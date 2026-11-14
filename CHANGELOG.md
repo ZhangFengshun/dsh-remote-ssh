@@ -2,6 +2,39 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.47] — 2026-11-14
+
+### 修：远端绝对路径打不开（`/sidebar/file` 双拼远端根，issue #39）
+
+**现象**（报告者 jackguan00，DSH Desktop / Windows 宿主 + Linux 远端）：远程工作区会话里点聊天中的
+远端绝对路径 `/home/dev/app/docs/file.md`，打开失败：
+`stat: cannot statx '/home/dev/app/home/dev/app/docs/file.md': No such file or directory`。
+同一条路径走 `POST /sidebar/api/fs.read` 是 200 —— 只有 `/sidebar/file` 这条链路坏。
+
+**根因**：`/sidebar/file` 的 exact 路由命中远程工作区后无条件 `localToRemote(rawPath, mirror, remoteRoot)`，
+而 `localToRemote()` 的契约是「入参必须是本地镜像路径」：不在镜像前缀下就把前导斜杠/盘符剥掉当相对路径，
+于是远端绝对路径被**又拼了一次远端根**。同一类问题还波及 `/remote-ssh/write` 与 `/remote-ssh/upload`（都直接调它）。
+另外 Windows 宿主会把路径归一成 `\home\dev\app\…`（单前导反斜杠、无盘符），分类器会判成相对路径。
+
+**修法**（在唯一汇合点兜住，一次覆盖所有入口）：
+
+- `localToRemote()`：先归一反斜杠；若入参本身是远端绝对路径（单 `/` 开头、非 UNC、且**不在镜像根下**）→ 原样下发；
+  先排除镜像根是为了不误伤「DSH 跑在 Linux 上、镜像路径本身也是 `/…`」的情形（同类误判见 issue #26）；
+- `sidebarEntriesFrom()`：tree 根是 POSIX 绝对路径时改用 POSIX 拼接（此前 Windows 宿主的 `path.join` 会产出
+  `\home\dev\app\sub`，客户端回传后既不像远端绝对路径、也不在镜像前缀下，于是又被拼一遍远端根）。
+
+**验证**：
+
+- 新增 `tests/remote-abs-path.test.mjs`（27 条）：`localToRemote` 真值表（镜像成员 / 镜像根 / 远端绝对 /
+  win32 归一形态 / Linux 镜像 / UNC / 盘符越界）、`sidebarEntriesFrom` 的 POSIX 拼接、**真实处理器**的
+  `/sidebar/file` 与 `/remote-ssh/write`（远端绝对只拼一次）、接线断言与 2 条变异负向控制；
+- 新增 `scripts/verify-remote-abs-path.mjs`（参数化真机 E2E）：**9/9 通过** —— posix 绝对 / win32 归一 / 镜像路径
+  三种入参都取到同一份远端字节，负向控制把修复分支删掉后确实复现「远端根拼两次」；
+- 修复前已在运行中的宿主上复现（`stat: cannot statx '<root>/home/dev/app/README.md'`）；
+- 全量 **44 文件 / 2365 断言 / 0 失败**。
+
+**未做（诚实记录）**：`/sidebar/archive`（侧栏打包下载）仍读本地镜像那一份，与本次无关，仍在待办。
+
 ## [2.4.46] — 2026-11-13
 
 ### 修：集成终端现在支持密码认证（issue #38）
