@@ -2,6 +2,39 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.46] — 2026-11-13
+
+### 修：集成终端现在支持密码认证（issue #38）
+
+**现象**（报告者）：密码认证的远程工作区里，侧栏「终端」只显示一行提示
+「检测到远程工作区，但该连接不是密钥认证：集成终端仅支持密钥认证，已回退为本地 shell。」，终端停在本地。
+
+**根因**：终端 wrapper（`~/.dsh/remote-ssh/dsh-remote-shell.js`）的判定是 `keyPath` 非空才算远程，
+密码连接（`keyPath` 为空）直接走"提示 + 本地 shell"分支。wrapper 是 DSH 之外独立运行的脚本，
+拿不到设置里的口令，于是当初就把密码认证整个排除了。
+
+**修法**：
+
+- wrapper 判定改为 **`host + user` 即可**：`keyPath` 非空仍走密钥（行为不变），为空则走**密码 / keyboard-interactive**：
+  `-o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=3`，
+  由 ssh 在终端（pty）里交互提问；
+- 显式清掉子进程环境里的 `SSH_ASKPASS` / `SSH_ASKPASS_REQUIRE`（`''` / `never`）——宿主或用户环境若有残留，
+  ssh 会去调 askpass 助手而不是问人，表现为终端卡住；
+- **wrapper 不存任何口令**（它是磁盘上的明文脚本）；
+- 删除旧的「仅支持密钥认证，已回退为本地 shell」提示。
+
+**验证**：
+
+- `tests/wrapper-terminal.test.mjs` 82 条：新增密码场景（argv 形状、不再出现 `-i`、askpass 被禁用、远程 cd 命令仍追加）、
+  密钥场景回归（不额外覆盖 env）、真实 `ssh -G` 离线判据（`preferredauthentications password,keyboard-interactive` 与
+  `pubkeyauthentication false` 生效），以及「旧提示文案已消失」的负向控制；
+- 真机（真实 sshd）：同一串密码 argv 到达认证阶段并回 `Permission denied (password,publickey)`（exit 255）
+  → 选项合法、路径可用；wrapper 在不给 stdin 的管道里会停在密码提问（说明交互提问确实发生）；
+- 全量 **43 文件 / 2338 断言 / 0 失败**。
+
+**限制（诚实记录）**：密码连接**每个新终端都要输一次**（没有 key/agent 复用，DSH 侧也不允许 wrapper 落盘明文口令）；
+想免密仍是配密钥或 ssh-agent。
+
 ## [2.4.45] — 2026-11-06
 
 ### 修：远程工作区里在侧栏编辑器改文件「保存不上」（issue #37）

@@ -40,7 +40,11 @@ Module._load = function (request) {
   if (request === 'child_process' || request === 'node:child_process') {
     return {
       spawn(bin, args, opts) {
-        fs.appendFileSync(capture, JSON.stringify({ bin, args, stdio: opts && opts.stdio }) + '\\n');
+        const env = opts && opts.env ? {
+          SSH_ASKPASS: opts.env.SSH_ASKPASS === undefined ? null : opts.env.SSH_ASKPASS,
+          SSH_ASKPASS_REQUIRE: opts.env.SSH_ASKPASS_REQUIRE === undefined ? null : opts.env.SSH_ASKPASS_REQUIRE,
+        } : null;
+        fs.appendFileSync(capture, JSON.stringify({ bin, args, stdio: opts && opts.stdio, env }) + '\\n');
         return { on() {} };
       }
     };
@@ -116,53 +120,48 @@ console.log('场景 4 · 无 remotePath（向后兼容，旧标记文件）')
   check(!args.some((a) => typeof a === 'string' && a.startsWith('cd ')), '不追加远程命令（行为与 2.4.4 之前一致）')
 }
 
-console.log('场景 5 · 非密钥认证的远程工作区 → 提示 + 本地 shell')
+console.log('场景 5 · 密码认证的远程工作区 → 照样连 ssh，交给终端交互提问（issue #38）')
 {
-  const dir = mkdtempSync(join(tmpdir(), 'rssh-wrapper-'))
-  try {
-    writeFileSync(join(dir, 'wrapper.js'), scriptText, 'utf8')
-    writeFileSync(join(dir, 'runner.cjs'), RUNNER, 'utf8')
-    writeFileSync(join(dir, '.remote-ssh.json'), JSON.stringify({ ...keyProfile, keyPath: '', remotePath: '~/x' }), 'utf8')
-    const capture = join(dir, 'capture.jsonl')
-    writeFileSync(capture, '')
-    const out = execFileSync(process.execPath, [join(dir, 'runner.cjs'), join(dir, 'wrapper.js'), dir, capture], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      encoding: 'utf8',
-    }).toString()
-    const spawns = readFileSync(capture, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
-    check(spawns.length === 1 && !spawns[0].bin.includes('ssh'), '未 spawn ssh（回落本地 shell）')
-    check(spawns[0].stdio === 'inherit', '本地 shell 继承 stdio')
-    // runner 的 stdout 不含警告（警告走 stderr）；用同步 API 读回 stderr：
-    check(typeof out === 'string', 'runner 正常结束（exit 0）')
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
+  const passwordProfile = { host: 'hpc.example.org', user: 'wxq', port: 2222, keyPath: '', remotePath: '~/x' }
+  const { spawns } = runScenario('password', passwordProfile)
+  check(spawns.length === 1, '只 spawn 一次')
+  const { bin, args, env } = spawns[0]
+  check(bin.includes('ssh'), 'spawn 的是 ssh（不再回退本地 shell）')
+  check(!args.includes('-i'), '不带 -i（这个连接没有密钥）')
+  check(args.includes('-tt'), '带 -tt 交互式通道')
+  check(args.includes('PreferredAuthentications=password,keyboard-interactive'), '只允许密码 / keyboard-interactive 认证')
+  check(args.includes('PubkeyAuthentication=no'), '关掉公钥尝试（密码机上少一轮白试）')
+  check(args.includes('NumberOfPasswordPrompts=3'), '密码提问次数上限 3')
+  check(args[args.length - 2] === 'wxq@hpc.example.org', '目标 user@host 正确')
+  check(args[args.length - 1] === 'cd "$HOME/x" 2>/dev/null || cd "$HOME"; exec "${SHELL:-/bin/bash}" -l', '远程命令仍追加（cd + 登录 shell）')
+  check(env && env.SSH_ASKPASS === '' && env.SSH_ASKPASS_REQUIRE === 'never', '子进程环境里禁用 askpass（让 ssh 问人，而不是去调助手）')
+  checkOptionPairs(args.slice(0, -1), '密码 argv')
 }
 
-console.log('场景 5b · 同上，校验 stderr 提示文案确实打印')
+console.log('场景 5b · 密钥认证不受影响 + 旧「仅支持密钥认证」文案已移除（负向控制）')
 {
-  const dir = mkdtempSync(join(tmpdir(), 'rssh-wrapper-'))
-  try {
-    writeFileSync(join(dir, 'wrapper.js'), scriptText, 'utf8')
-    writeFileSync(join(dir, 'runner.cjs'), RUNNER, 'utf8')
-    writeFileSync(join(dir, '.remote-ssh.json'), JSON.stringify({ ...keyProfile, keyPath: '', remotePath: '~/x' }), 'utf8')
-    const capture = join(dir, 'capture.jsonl')
-    writeFileSync(capture, '')
-    // execFileSync 默认把子进程 stderr 透传给父进程；这里显式捕获
-    let stderr = ''
-    try {
-      execFileSync(process.execPath, [join(dir, 'runner.cjs'), join(dir, 'wrapper.js'), dir, capture], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' })
-    } catch (e) {
-      stderr = String(e.stderr || '')
-    }
-    // 用 spawnSync 重新跑一次以稳定拿到 stderr
-    const { spawnSync } = await import('node:child_process')
-    const r = spawnSync(process.execPath, [join(dir, 'runner.cjs'), join(dir, 'wrapper.js'), dir, capture], { encoding: 'utf8' })
-    const err = String(r.stderr || '')
-    check(/dsh-remote-ssh/.test(err) && /密钥认证/.test(err), 'stderr 打出「仅支持密钥认证，已回退为本地 shell」提示')
-    check(/key-authenticated/.test(err), '附英文提示')
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
+  const { spawns } = runScenario('key-env', { ...keyProfile, remotePath: '~/x' })
+  const { args, env } = spawns[0]
+  check(args.includes('-i') && args.includes(keyProfile.keyPath), '密钥连接仍带 -i')
+  check(!env || env.SSH_ASKPASS === null, '密钥连接不额外覆盖 askpass env（行为与 2.4.45 一致）')
+  check(!scriptText.includes('集成终端仅支持密钥认证'), '生成的脚本里不再有「仅支持密钥认证」文案')
+  check(!/fell back to a local shell/.test(scriptText), '也不再打印英文回退提示')
+}
+
+console.log('场景 5c · 真实 ssh 的离线判据：密码 argv 能被 ssh 接受（ssh -G）')
+{
+  const passwordProfile = { host: 'hpc.example.org', user: 'wxq', port: 2222, keyPath: '', remotePath: '~/x' }
+  const { spawns } = runScenario('password-real', passwordProfile)
+  const raw = spawns[0].args
+  const argv = raw[raw.length - 1].startsWith('cd ') ? raw.slice(0, -1) : raw
+  const dump = sshConfigDump(argv)
+  if (dump.skipped) {
+    console.log('  … 跳过（本机没有可用的 ssh：' + dump.reason + '）')
+  } else {
+    check(dump.ok && !/Bad configuration option|no argument after keyword/.test(dump.stderr), '真实 ssh 接受这串密码 argv')
+    check(/^preferredauthentications password,keyboard-interactive$/m.test(dump.stdout), 'ssh -G 确认 PreferredAuthentications 生效')
+    // 注意：ssh -G 把 no 规范化成 false（不同版本可能原样输出 no），两种都接受
+  check(/^pubkeyauthentication (no|false)$/m.test(dump.stdout), 'ssh -G 确认 PubkeyAuthentication=no 生效')
   }
 }
 
