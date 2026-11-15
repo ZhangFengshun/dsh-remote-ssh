@@ -2,6 +2,39 @@
 
 本文件的版本号与 `package.json` 的 `version` 保持一致。每个版本对应一个 Cordis Package 快照（`pkg-N`）。
 
+## [2.4.48] — 2026-11-15
+
+### 性能：远程文件打开提速（媒体/预览 ≈2×、重复打开 ≈0、首次不再付握手）
+
+按要求把「打开远程文件」这条链路从头到尾查了一遍，并用**真机 + curl** 分段测量（RTT≈70–80ms；
+curl 排除客户端库开销后宿主路由本身只有 ~1–3ms）：
+
+| 路径 | 优化前 | 优化后 |
+|---|---|---|
+| 文本打开 `fs.read`（热） | ~1.3ms（已有合并 stat + raw 文本快路径 + 5s LRU） | 不变（命中 0 RTT；已是 1 个 RTT） |
+| 媒体/预览 `/sidebar/file` | **190ms**（stat、base64 两条命令 = 2 RTT，且无缓存） | **~87ms（1 RTT）**；重复打开命中字节缓存 **~1–3ms** |
+| 首次打开（宿主刚启动/会话过期） | **~1.3s**（SSH 握手） | 挂载 2s 后自动预热 → 首次 ≈1 个 RTT |
+
+- 新增 `buildFetchBytesCommand`：**一次往返**同时拿 size/mtime 与 base64；超限时**先**回 ERR 帧（带真实字节数），
+  绝不把大文件 base64 进内存；size 与载荷长度不符也明确报错（防截断的图片被静默渲染）；
+- 新增 `bytesCache` 字节 LRU（TTL 30s、单条 ≤8MiB、总量 ≤64MiB、epoch 感知 —— 任何写/删/移/exec/git 立即失效）；
+- `/sidebar/file` 增加 `ETag: "size-mtime"` 与 `cache-control: private, max-age=0, must-revalidate`：
+  浏览器重校验命中直接 **304（0 字节传输）**；
+- 新增 `warmConnections`（默认开；`DSH_REMOTE_SSH_WARM=0` 或设置里关掉即不发起任何额外连接）：
+  插件挂载 2s 后对每个有远程工作区的 profile 发一条 no-op 命令预热池化会话。
+
+**验证**：
+
+- 新增 `tests/media-fetch-faster.test.mjs`（**35 条**）：命令形状（单 stat/单 base64/超限 ERR）、字节缓存命中/epoch/TTL、
+  超限与长度不符、ETag/304、接线与配置、变异负向控制（删掉缓存写入后「第二次 0 命令」断言立刻变红）；
+- 新增 `scripts/verify-media-fetch-command.mjs`（真机）：**1 趟 87ms vs 旧 2 趟 167ms（1.9×）**，载荷与独立读取**逐字节一致**，
+  超限 / 缺失文件都回正确 ERR 帧；
+- 新增 `scripts/bench-remote-open.mjs`（分段基准：冷连接 / RTT / stat / base64 / 合并命令 / raw 文本 / 目录列举 / HTTP 路由）；
+- 全量 **45 文件 / 2399 断言 / 0 失败**。
+
+**审计结论（未改，因为不构成瓶颈）**：`fs.read` 已是「合并 stat + 内容」的 1 个 RTT 且带 5s LRU；`fs.tree/trees` 有 5s 目录缓存
+与批量列举；HTTP 路由本身开销 ~1–3ms。此前有些工具把 ~60ms 记成「插件慢」，实测那是客户端 undici 的每请求开销，服务端没有。
+
 ## [2.4.47] — 2026-11-14
 
 ### 修：远端绝对路径打不开（`/sidebar/file` 双拼远端根，issue #39）
